@@ -1,0 +1,64 @@
+#! /usr/bin/env python3
+
+import cv2
+import numpy as np
+
+imgs = [cv2.imread(f'pedestrian_images_1/img_{i}.jpg') for i in range(8)]
+
+height, width = imgs[0].shape[:2]
+imgs = [cv2.resize(img, (int(width/2), int(height/2))) for img in imgs]
+
+# ho1 = np.hstack((imgs[0], imgs[1], imgs[2], imgs[3]))
+# ho2 = np.hstack((imgs[4], imgs[5], imgs[6], imgs[7]))
+# ho1 = np.hstack((imgs[0], imgs[1]))
+# ho2 = np.hstack((imgs[2], imgs[4]))
+# img_array = np.vstack((ho1, ho2))
+# cv2.imshow('pedestrian images', img_array)
+# cv2.waitKey(0)
+
+# cv2.imwrite('pedestrian_images_1/pedestrian_array_1.jpg', img_array)
+
+def find_road_edges(img, y):
+    height, width = img.shape[:2]
+    gray_img = cv2.cvtColor(img, cv2.COLOR_BGR2GRAY)
+    white_mask = cv2.inRange(gray_img, 250, 255)
+    
+    left_index = -1
+    right_index = -1
+
+    # cv2.imshow('white mask', white_mask)
+
+    for i in range(width):
+        if white_mask[y, i] == 255 and left_index == -1:
+            left_index = i
+        elif white_mask[y, i] == 255 and left_index != -1:
+            right_index = i
+    print(left_index, right_index)
+    return left_index, right_index
+
+bg_sub = cv2.createBackgroundSubtractorMOG2()
+
+for image in imgs:
+    image_copy = image.copy()
+    fg_mask = bg_sub.apply(image)
+    # cv2.imshow('foreground mask', fg_mask)
+    # cv2.imshow('original image', image)
+    
+    contours, _ = cv2.findContours(fg_mask, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
+    largest_contour = max(contours, key=cv2.contourArea)
+    x, y, w, h = cv2.boundingRect(largest_contour)
+    cv2.rectangle(image, (x, y), (x+w, y+h), (0, 255, 0), 2)
+    cv2.circle(image, (x+w//2,y+h), 5, (0, 0, 255), -1)
+
+    road_left, road_right = find_road_edges(image_copy, y+h-1)
+    print(x+(w//2))
+    cv2.circle(image, (road_left, y+h), 5, (0, 0, 255), -1)
+    cv2.circle(image, (road_right, y+h), 5, (0, 0, 255), -1)
+    if x + (w //2) < road_left -30 or x + (w // 2) > road_right + 30:
+        print('no ped on road, GOOOO')
+    else:
+        print('pedestrian on road WAIT')
+
+    img_array = np.hstack((image, cv2.cvtColor(fg_mask, cv2.COLOR_GRAY2BGR)))
+    cv2.imshow('foreground mask and original image', img_array)
+    cv2.waitKey(0)
