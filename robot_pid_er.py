@@ -28,6 +28,7 @@ class Driver():
         self.kp = 10 # proportional gain for PID controller
         self.lin_speed = 0.4 # defualt PID linear speed of robot
         self.rot_speed = 1.0 # base PID angular speed of robot
+        self.speed_buffer = 1.5 # buffer for gradual speed increase/decrease
 
         self.bg_sub = cv2.createBackgroundSubtractorMOG2()
         self.reached_crosswalk = False
@@ -189,7 +190,9 @@ class Driver():
         
     def drive_robot(self, linear, angular):
         """
-        Publishes a velocity command.
+        Publishes a velocity command. If the linear velocity to be published is greater than or
+        less than the current linear velocity by more/less than 1.5, the function gradually
+        increases/decreases the linear velocity. 
 
         Parameters:
         linear (float): The linear velocity in the x direction.
@@ -198,7 +201,7 @@ class Driver():
         Returns:
         None
         """
-        if linear > 1.5:
+        if linear >  self.move.linear.x + self.speed_buffer:
             vel = 0.2
             temp_counter = self.cycle_count
             while vel < linear:
@@ -207,6 +210,17 @@ class Driver():
                     self.move.angular.z = angular
                     self.vel_pub.publish(self.move)
                     vel += 0.1
+                    temp_counter = self.cycle_count
+
+        elif linear < self.move.linear.x - self.speed_buffer:
+            vel = self.move.linear.x
+            temp_counter = self.cycle_count
+            while vel < linear:
+                if self.cycle_count > temp_counter:
+                    self.move.linear.x = vel
+                    self.move.angular.z = angular
+                    self.vel_pub.publish(self.move)
+                    vel -= 0.1
                     temp_counter = self.cycle_count
         else:
             self.move.linear.x  = linear
