@@ -44,10 +44,24 @@ class Driver():
         self.img = self.bridge.imgmsg_to_cv2(msg, 'bgr8')
         self.img_height, self.img_width = self.img.shape[:2]
 
-    # returns centre of road in a thresholded image at where the road is outlined in white (255) 
-    # y pixels above the bottom of the img
-    # if ret_sides is True, returns the left and right indices of the road
     def find_road_centre(self, img, y, ret_sides=False):
+        """
+        Returns the centre of the road at y pixels above the bottom of the image in a thresholded 
+        image where the road is outlined in white. If ret_sides is True, returns the left and 
+        right indices of the road.
+
+        Parameters:
+        img (numpy.ndarray): Thresholded image where the road is outlined in white (255).
+        y (int): The number of pixels above the bottom of the image to find the centre.
+        ret_sides (bool, optional): If set to True, the function returns the left and right 
+                                    indices of the road. Default is False.
+
+        Returns:
+        int or tuple: If ret_sides is True, the function returns a tuple (left_index, right_index) 
+                        representing the left and right indices of the road.
+                      If ret_sides is False, the function returns an integer representing the center
+                        of the road. If the road center cannot be determined, the function returns -1.
+        """
         left_index = right_index = -1
         for i in range(self.img_width):
             if img[self.img_height - y, i] == 255 and left_index == -1:
@@ -80,12 +94,27 @@ class Driver():
     # returns error of 0 if no road lines are found on either side
     # enters the truck state if no road is detected and have reached the crosswalk
     def get_error(self, img, road=True, desert=False):
+        """
+        Returns the error between the centre of the road and the centre of a thresholded image
+        for either a road or desert image, default is road. Returns error of 0 if no road lines 
+        are found on either side. Enters the truck state if no road is detected and have reached 
+        the crosswalk.
+
+        Parameters:
+        img (numpy.ndarray): The input image.
+        road (bool, optional): If True, the function processes the image as a road image. Default is True.
+        desert (bool, optional): If True, the function processes the image as a desert image. Default is False.
+
+        Returns:
+        float: The error between the centre of the road and the centre of the image. Returns 0 if no 
+        road lines are found on either side.
+        """
         if road:
-            gray_img = cv2.cvtColor(self.img, cv2.COLOR_BGR2GRAY)
+            gray_img = cv2.cvtColor(img, cv2.COLOR_BGR2GRAY)
             mask = cv2.inRange(gray_img, 250, 255)
         elif desert:
             # TODO: threshold desert image
-            mask = cv2.inRange(self.img, (0, 0, 0), (255, 255, 255)) # to be changed
+            mask = cv2.inRange(img, (0, 0, 0), (255, 255, 255)) # to be changed
 
         road_centre = self.find_road_centre(mask, self.num_pixels_above_bottom)
         if road_centre != -1:
@@ -98,8 +127,16 @@ class Driver():
             error = 0
         return error
     
-    # returns true if red is found in the img with an area greater than red_line_min_area
     def check_red(self, img):
+        """
+        Checks if red is found in the image with an area greater than red_line_min_area.
+
+        Parameters:
+        img (numpy.ndarray): The input image.
+
+        Returns:
+        bool: Returns True if red is found in the image with an area greater than red_line_min_area, otherwise False.
+        """
         cropped_img = img[self.red_line_cutoff:self.img_height]
             
         uh_red = 255; us_red = 255; uv_red = 255
@@ -122,6 +159,15 @@ class Driver():
 
     # return true if the pedestrian is on the cross walk or within the 
     def check_pedestrian(self, img):
+        """
+        Checks if a pedestrian is on the crosswalk or within a buffer distance to the road.
+
+        Parameters:
+        img (numpy.ndarray): The input image.
+
+        Returns:
+        bool: Returns True if a pedestrian is detected on the crosswalk or within the buffer, otherwise False.
+        """
         fg_mask = self.bg_sub.apply(img)
 
         # cv2.imshow('camera feed', fg_mask)
@@ -140,17 +186,28 @@ class Driver():
         else:
             return False
         
-    # publishes a velocity command with linear in x and angular in z
     def drive_robot(self, linear, angular):
+        """
+        Publishes a velocity command.
+
+        Parameters:
+        linear (float): The linear velocity in the x direction.
+        angular (float): The angular velocity in the z direction.
+
+        Returns:
+        None
+        """
         self.move.linear.x = linear
         self.move.angular.z = angular
         self.vel_pub.publish(self.move)
     
+    # placeholder for start function
     def start(self):
         # start the timer
         print('starting timer, entering road pid state')
         self.state = 'road'
     
+    # main loop for the driver
     def run(self):
         while not rospy.is_shutdown():
             if self.img is None:
