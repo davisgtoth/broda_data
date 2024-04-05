@@ -39,6 +39,8 @@ class Driver():
         self.ped_sleep_time = 0.6 # time to sleep when crossing crosswalk
 
         self.reached_truck = False
+        self.truck_buffer = 0.2 # how much to slow down when behind truck
+        self.truck_turn = 1.3 # how much to turn left/right when at intersection
 
         self.state = 'init' # init, road, ped, truck, desert, yoda
 
@@ -245,11 +247,11 @@ class Driver():
             if self.img is None:
                 continue
             
-            # initialization state
+            # -------- initialization state --------
             elif self.state == 'init':
                 self.start()
 
-            # road state
+            # ------------- road state -------------
             elif self.state == 'road':
                 if self.reached_crosswalk == False and self.check_red(self.img):
                     print('red detected, going to ped state')
@@ -260,7 +262,7 @@ class Driver():
                     # print(error)
                     self.drive_robot(self.lin_speed, self.rot_speed * error)
 
-            # pedestrian state
+            # ---------- pedestrian state ----------
             elif self.state == 'ped':
                 if self.check_pedestrian(self.img):
                     print('pedestrian detected, waiting...')
@@ -271,31 +273,46 @@ class Driver():
                     print('crossing crosswalk, going back to road pid state')
                     self.state = 'road'
             
-            # truck state
+            # ------------- truck state -------------
             elif self.state == 'truck':
                 self.drive_robot(0, 0)
                 rospy.sleep(3)
+
+                # intersection for first time, detects truck - wait and go right
                 if not self.reached_truck and self.check_truck(self.img):
-                    # at intersection for first time and truck right there 
-                    # wait for truck to pass then go right, fast (wait time depends on where truck is)
+                    print('at intersection for first time and truck right there')
+                    while self.check_truck(self.img):
+                        self.drive_robot(0, 0)
                     self.reached_truck = True
+                    self.drive_robot(self.lin_speed, -1 * self.truck_turn)
+                
+                # intersection for first time, no truck - go left
                 elif not self.reached_truck and not self.check_truck(self.img):
-                    # at intersection for first time, on truck
+                    print('at intersection for first time, no truck')
                     # go left
+                    self.drive_robot(self.lin_speed, self.truck_turn)
                     self.reached_truck = True
+                
+                # driving, detects truck
                 elif self.reached_truck:
+                    print('driving, found truck')
                     # slow down and but keep doing pid
-                    pass
+                    error = self.kp * self.get_error(self.img)
+                    self.drive_robot(self.lin_speed - self.truck_buffer, self.rot_speed * error)
+                
+                # driving, no truck
                 else:
+                    print('driving')
                     # regular road pid
-                    pass
+                    error = self.kp * self.get_error(self.img)
+                    self.drive_robot(self.lin_speed, self.rot_speed * error)
 
 
-            # desert state
+            # ------------ desert state -------------
             elif self.state == 'desert':
                 pass
 
-            # yoda state
+            # -------------- yoda state --------------
             elif self.state == 'yoda':
                 pass
         
