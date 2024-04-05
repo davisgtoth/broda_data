@@ -205,6 +205,7 @@ class Driver():
         Returns:
         None
         """
+        # TODO: check if accel/decel is working
         if linear >  self.move.linear.x + self.speed_buffer:
             vel = 0.2
             temp_counter = self.cycle_count
@@ -232,7 +233,13 @@ class Driver():
             self.vel_pub.publish(self.move)
 
     def check_truck(self, img):
+        # TODO: check for truck in the image
         # background subtract cropped image for right in front (with some buffer, wider than road)
+        return False
+    
+    def check_magenta(self, img):
+        # TODO: check for magenta in the image
+        # check for magenta in the image
         return False
 
     # placeholder for start function
@@ -257,6 +264,9 @@ class Driver():
                     print('red detected, going to ped state')
                     self.reached_crosswalk = True
                     self.state = 'ped'
+                elif self.reached_truck and self.check_magenta(self.img):
+                    print('magenta detected, going to desert state')
+                    self.state = 'desert'
                 else:
                     error = self.kp * self.get_error(self.img)
                     # print(error)
@@ -264,6 +274,7 @@ class Driver():
 
             # ---------- pedestrian state ----------
             elif self.state == 'ped':
+                # TODO: test pedestrian state
                 if self.check_pedestrian(self.img):
                     print('pedestrian detected, waiting...')
                 else:
@@ -275,6 +286,7 @@ class Driver():
             
             # ------------- truck state -------------
             elif self.state == 'truck':
+                # TODO: test truck state
                 self.drive_robot(0, 0)
                 rospy.sleep(3)
 
@@ -310,11 +322,20 @@ class Driver():
 
             # ------------ desert state -------------
             elif self.state == 'desert':
-                pass
+                if self.check_magenta(self.img):
+                    print('magenta detected, going to yoda state')
+                    self.state = 'yoda'
+                else:
+                    error = self.kp * self.get_error(self.img, road=False, desert=True)
+                    self.drive_robot(self.lin_speed, self.rot_speed * error)
 
             # -------------- yoda state --------------
             elif self.state == 'yoda':
-                pass
+                if self.check_magenta(self.img):
+                    print('magenta detected, going back to desert state')
+                else:
+                    # hard code to go over hill, pid to something else?
+                    pass
         
         rospy.sleep(0.1)
 
