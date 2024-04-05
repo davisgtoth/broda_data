@@ -38,6 +38,8 @@ class Driver():
         self.ped_ang_speed = 0 # angular speed of robot when crossing crosswalk
         self.ped_sleep_time = 0.6 # time to sleep when crossing crosswalk
 
+        self.reached_truck = False
+
         self.state = 'init' # init, road, ped, truck, desert, yoda
 
     # callback function for camera subscriber
@@ -227,6 +229,10 @@ class Driver():
             self.move.angular.z = angular
             self.vel_pub.publish(self.move)
 
+    def check_truck(self, img):
+        # background subtract cropped image for right in front (with some buffer, wider than road)
+        return False
+
     # placeholder for start function
     def start(self):
         # start the timer
@@ -268,6 +274,22 @@ class Driver():
             # truck state
             elif self.state == 'truck':
                 self.drive_robot(0, 0)
+                rospy.sleep(3)
+                if not self.reached_truck and self.check_truck(self.img):
+                    # at intersection for first time and truck right there 
+                    # wait for truck to pass then go right, fast (wait time depends on where truck is)
+                    self.reached_truck = True
+                elif not self.reached_truck and not self.check_truck(self.img):
+                    # at intersection for first time, on truck
+                    # go left
+                    self.reached_truck = True
+                elif self.reached_truck:
+                    # slow down and but keep doing pid
+                    pass
+                else:
+                    # regular road pid
+                    pass
+
 
             # desert state
             elif self.state == 'desert':
