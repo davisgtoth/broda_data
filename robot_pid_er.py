@@ -13,29 +13,29 @@ class Driver():
 
         self.bridge = CvBridge()
         rospy.Subscriber("/R1/pi_camera/image_raw", Image, self.callback)
-
         self.vel_pub = rospy.Publisher('/R1/cmd_vel', Twist, queue_size=1)
 
         self.img = None
         self.img_height = 0
         self.img_width = 0
+        self.cycle_count = 0
 
-        self.num_pixels_above_bottom = 200
-        self.red_line_cutoff = 700
-        self.red_line_min_area = 1000
+        self.road_buffer = 200 # pixels above bottom of image to find road centre
+        self.red_line_cutoff = 700 # pixels from top of image detect red line
+        self.red_line_min_area = 1000 # minimum contour area for red line
 
         self.move = Twist()
-        self.kp = 10
-        self.lin_speed = 0.4
-        self.rot_speed = 1.0
+        self.kp = 10 # proportional gain for PID controller
+        self.lin_speed = 0.4 # defualt PID linear speed of robot
+        self.rot_speed = 1.0 # base PID angular speed of robot
 
         self.bg_sub = cv2.createBackgroundSubtractorMOG2()
         self.reached_crosswalk = False
-        self.ped_buffer = 60
+        self.ped_buffer = 60 # lateral pixel buffer for pedestrian detection
 
-        self.ped_lin_speed = 1.2
-        self.ped_ang_speed = 0
-        self.ped_sleep_time = 0.6
+        self.ped_lin_speed = 2.0 # linear speed of robot when crossing crosswalk
+        self.ped_ang_speed = 0 # angular speed of robot when crossing crosswalk
+        self.ped_sleep_time = 0.6 # time to sleep when crossing crosswalk
 
         self.state = 'init' # init, road, ped, truck, desert, yoda
 
@@ -43,6 +43,7 @@ class Driver():
     def callback(self, msg):
         self.img = self.bridge.imgmsg_to_cv2(msg, 'bgr8')
         self.img_height, self.img_width = self.img.shape[:2]
+        self.cycle_count += 1
 
     def find_road_centre(self, img, y, ret_sides=False):
         """
@@ -116,7 +117,7 @@ class Driver():
             # TODO: threshold desert image
             mask = cv2.inRange(img, (0, 0, 0), (255, 255, 255)) # to be changed
 
-        road_centre = self.find_road_centre(mask, self.num_pixels_above_bottom)
+        road_centre = self.find_road_centre(mask, self.road_buffer)
         if road_centre != -1:
             error = ((self.img_width // 2) - road_centre) / (self.img_width // 2)
         elif self.reached_crosswalk:
@@ -197,10 +198,21 @@ class Driver():
         Returns:
         None
         """
-        self.move.linear.x = linear
-        self.move.angular.z = angular
-        self.vel_pub.publish(self.move)
-    
+        if linear > 1.5:
+            vel = 0.2
+            temp_counter = self.cycle_count
+            while vel < linear:
+                if self.cycle_count > temp_counter:
+                    self.move.linear.x = vel
+                    self.move.angular.z = angular
+                    self.vel_pub.publish(self.move)
+                    vel += 0.1
+                    temp_counter = self.cycle_count
+        else:
+            self.move.linear.x  = linear
+            self.move.angular.z = angular
+            self.vel_pub.publish(self.move)
+
     # placeholder for start function
     def start(self):
         # start the timer
@@ -214,7 +226,7 @@ class Driver():
                 continue
             
             # initialization state
-            if self.state == 'init':
+            elif self.state == 'init':
                 self.start()
 
             # road state
