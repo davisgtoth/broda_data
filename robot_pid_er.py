@@ -15,40 +15,46 @@ class Driver():
         rospy.Subscriber("/R1/pi_camera/image_raw", Image, self.callback)
         self.vel_pub = rospy.Publisher('/R1/cmd_vel', Twist, queue_size=1)
 
+        self.state = 'init' # init, road, ped, truck, desert, yoda 
+        
+        # image variables
         self.img = None
         self.img_height = 0
         self.img_width = 0
+        
         self.cycle_count = 0
 
+        # PID controller variables
+        self.move = Twist()
+        self.lin_speed = 0.5 # defualt PID linear speed of robot
+        self.rot_speed = 1.0 # base PID angular speed of robot
+        
+        self.kp = 11 # proportional gain for PID controller
         self.road_buffer = 200 # pixels above bottom of image to find road centre
-        self.red_line_cutoff = 700 # pixels from top of image detect red line
+        self.speed_buffer = 1.3 # buffer for gradual speed increase/decrease
+        
+        # Pedestraian detection variables
+        self.reached_crosswalk = False
         self.red_line_min_area = 1000 # minimum contour area for red line
 
-        self.move = Twist()
-        self.kp = 10 # proportional gain for PID controller
-        self.lin_speed = 0.4 # defualt PID linear speed of robot
-        self.rot_speed = 1.0 # base PID angular speed of robot
-        self.speed_buffer = 1.5 # buffer for gradual speed increase/decrease
-
         self.bg_sub = cv2.createBackgroundSubtractorMOG2()
-        self.reached_crosswalk = False
         self.ped_buffer = 60 # lateral pixel buffer for pedestrian detection
 
-        self.ped_lin_speed = 2.0 # linear speed of robot when crossing crosswalk
+        self.ped_lin_speed = 2.2 # linear speed of robot when crossing crosswalk
         self.ped_ang_speed = 0 # angular speed of robot when crossing crosswalk
-        self.ped_sleep_time = 0.6 # time to sleep when crossing crosswalk
+        self.ped_sleep_time = 0.0 # time to sleep when crossing crosswalk
 
+        # Truck detection variables
         self.reached_truck = False
         self.truck_buffer = 0.2 # how much to slow down when behind truck
         self.truck_turn = 1.3 # how much to turn left/right when at intersection
-
-        self.state = 'init' # init, road, ped, truck, desert, yoda
 
     # callback function for camera subscriber
     def callback(self, msg):
         self.img = self.bridge.imgmsg_to_cv2(msg, 'bgr8')
         self.img_height, self.img_width = self.img.shape[:2]
         self.cycle_count += 1
+        # print(f'cycle count: {self.cycle_count}')
 
     def find_road_centre(self, img, y, ret_sides=False):
         """
@@ -133,7 +139,7 @@ class Driver():
             error = 0
         return error
     
-    def check_red(self, img):
+    def check_red(self, img, ret_angle=False, ret_y=False):
         """
         Checks if red is found in the image with an area greater than red_line_min_area.
 
@@ -143,14 +149,12 @@ class Driver():
         Returns:
         bool: Returns True if red is found in the image with an area greater than red_line_min_area, otherwise False.
         """
-        cropped_img = img[self.red_line_cutoff:self.img_height]
-            
         uh_red = 255; us_red = 255; uv_red = 255
         lh_red = 90; ls_red = 50; lv_red = 230
         lower_hsv_red = np.array([lh_red, ls_red, lv_red])
         upper_hsv_red = np.array([uh_red, us_red, uv_red])
         
-        hsv_img = cv2.cvtColor(cropped_img, cv2.COLOR_RGB2HSV)
+        hsv_img = cv2.cvtColor(img, cv2.COLOR_RGB2HSV)
         red_mask = cv2.inRange(hsv_img, lower_hsv_red, upper_hsv_red)
 
         contours, _ = cv2.findContours(red_mask, cv2.RETR_TREE, cv2.CHAIN_APPROX_SIMPLE)
@@ -158,10 +162,17 @@ class Driver():
             return False
 
         largest_contour = max(contours, key=cv2.contourArea)
-        if cv2.contourArea(largest_contour) < self.red_line_min_area:
-            return False
-        else:
-            return True
+        rect = cv2.minAreaRect(largest_contour)
+
+        if not ret_angle and not ret_y:
+            if cv2.contourArea(largest_contour) < self.red_line_min_area:
+                return False
+            else:
+                return True
+        elif ret_angle:
+            return rect[2]
+        elif ret_y:
+            return rect[0][1]
 
     # return true if the pedestrian is on the cross walk or within the 
     def check_pedestrian(self, img):
@@ -185,7 +196,9 @@ class Driver():
         largest_contour = max(contours, key=cv2.contourArea)
         x, y, w, h = cv2.boundingRect(largest_contour)
 
-        road_left, road_right = self.find_road_centre(img, self.img_height-(y+h-1), ret_sides=True)
+        gray_img = cv2.cvtColor(img, cv2.COLOR_BGR2GRAY)
+        white_mask = cv2.inRange(gray_img, 250, 255)
+        road_left, road_right = self.find_road_centre(white_mask, self.img_height-(y+h-1), ret_sides=True)
 
         if road_left - self.ped_buffer < (x + w//2) < road_right + self.ped_buffer:
             return True
@@ -207,26 +220,28 @@ class Driver():
         """
         # TODO: check if accel/decel is working
         if linear >  self.move.linear.x + self.speed_buffer:
-            vel = 0.2
-            temp_counter = self.cycle_count
-            while vel < linear:
-                if self.cycle_count > temp_counter:
-                    self.move.linear.x = vel
-                    self.move.angular.z = angular
-                    self.vel_pub.publish(self.move)
-                    vel += 0.1
-                    temp_counter = self.cycle_count
-
-        elif linear < self.move.linear.x - self.speed_buffer:
             vel = self.move.linear.x
             temp_counter = self.cycle_count
             while vel < linear:
                 if self.cycle_count > temp_counter:
                     self.move.linear.x = vel
-                    self.move.angular.z = angular
+                    self.move.angular.z = 0
                     self.vel_pub.publish(self.move)
-                    vel -= 0.1
+                    vel += 0.25
                     temp_counter = self.cycle_count
+                    print('speeding up')
+
+        elif linear < self.move.linear.x - self.speed_buffer:
+            vel = self.move.linear.x
+            temp_counter = self.cycle_count
+            while vel > linear:
+                if self.cycle_count > temp_counter:
+                    self.move.linear.x = vel
+                    self.move.angular.z = 0
+                    self.vel_pub.publish(self.move)
+                    vel -= 0.25
+                    temp_counter = self.cycle_count
+                    print('slowing down')
         else:
             self.move.linear.x  = linear
             self.move.angular.z = angular
@@ -275,6 +290,19 @@ class Driver():
             # ---------- pedestrian state ----------
             elif self.state == 'ped':
                 # TODO: test pedestrian state
+                while 1 < self.check_red(self.img, ret_angle=True) < 89:
+                    angle = self.check_red(self.img, ret_angle=True)
+                    if angle < 45:
+                        self.drive_robot(self.lin_speed/3, -1 * angle * 0.3)
+                    else:
+                        self.drive_robot(self.lin_speed/3, (90 - angle) * 0.3)
+                print('red line straight')
+                while self.check_red(self.img, ret_y=True) < 400:
+                    self.drive_robot(self.lin_speed, 0)
+                    print('checked y')
+                print('red line close')
+                # self.drive_robot(0, 0)
+                # rospy.sleep(3)
                 if self.check_pedestrian(self.img):
                     print('pedestrian detected, waiting...')
                 else:
@@ -337,7 +365,7 @@ class Driver():
                     # hard code to go over hill, pid to something else?
                     pass
         
-        rospy.sleep(0.1)
+        # rospy.sleep(0.1)
 
 if __name__ == '__main__':
     try:

@@ -33,7 +33,7 @@ def find_road_edges(img, y):
             left_index = i
         elif white_mask[y, i] == 255 and left_index != -1:
             right_index = i
-    print(left_index, right_index)
+    # print(left_index, right_index)
     return left_index, right_index
 
 bg_sub = cv2.createBackgroundSubtractorMOG2()
@@ -51,14 +51,55 @@ for image in imgs:
     cv2.circle(image, (x+w//2,y+h), 5, (0, 0, 255), -1)
 
     road_left, road_right = find_road_edges(image_copy, y+h-1)
-    print(x+(w//2))
+    # print(x+(w//2))
     cv2.circle(image, (road_left, y+h), 5, (0, 0, 255), -1)
     cv2.circle(image, (road_right, y+h), 5, (0, 0, 255), -1)
-    if x + (w //2) < road_left -30 or x + (w // 2) > road_right + 30:
-        print('no ped on road, GOOOO')
-    else:
-        print('pedestrian on road WAIT')
+    # if x + (w //2) < road_left -30 or x + (w // 2) > road_right + 30:
+    #     print('no ped on road, GOOOO')
+    # else:
+    #     print('pedestrian on road WAIT')
 
     img_array = np.hstack((image, cv2.cvtColor(fg_mask, cv2.COLOR_GRAY2BGR)))
-    cv2.imshow('foreground mask and original image', img_array)
+    # cv2.imshow('foreground mask and original image', img_array)
+    # cv2.waitKey(0)
+
+red_line_images = [cv2.imread(f'crosswalk_images_1/img_{i}.jpg') for i in range(30)]
+for image in red_line_images:
+    print('------- new image -------')
+    uh_red = 255; us_red = 255; uv_red = 255
+    lh_red = 90; ls_red = 50; lv_red = 230
+    lower_hsv_red = np.array([lh_red, ls_red, lv_red])
+    upper_hsv_red = np.array([uh_red, us_red, uv_red])
+    
+    hsv_img = cv2.cvtColor(image, cv2.COLOR_RGB2HSV)
+    red_mask = cv2.inRange(hsv_img, lower_hsv_red, upper_hsv_red)
+
+    contours, _ = cv2.findContours(red_mask, cv2.RETR_TREE, cv2.CHAIN_APPROX_SIMPLE)
+    largest_contour = max(contours, key=cv2.contourArea)
+    print(f'area: {cv2.contourArea(largest_contour)}')
+
+    rect = cv2.minAreaRect(largest_contour)
+    print(f'x, y: {round(rect[0][0], 1)}, {round(rect[0][1], 1)}')
+    print(f'width, height: {round(rect[1][0], 1)}, {round(rect[1][1], 1)}')
+    print(f'angle: {round(rect[2], 1)}')
+    
+    height, width = image.shape[:2]
+    image = cv2.resize(image, (int(width/2), int(height/2)))
+    red_mask = cv2.resize(red_mask, (int(width/2), int(height/2)))
+    display_img = np.hstack((image, cv2.cvtColor(red_mask, cv2.COLOR_GRAY2BGR)))
+
+    print()
+
+    if cv2.contourArea(largest_contour) < 1800:
+        print('red line too small')
+    elif rect[0][1] < 475:
+        print('red line too far away')
+    elif 1 < rect[2] < 89:
+        print('red line too angled')
+    else:
+        print('red line good, going to ped state')
+
+    print()
+
+    cv2.imshow('red line images', display_img)
     cv2.waitKey(0)
