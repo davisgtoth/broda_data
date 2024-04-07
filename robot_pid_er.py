@@ -51,7 +51,7 @@ class Driver():
         self.ped_right_buffer = 80
         self.ped_min_area = 400 # minimum contour area for detecting the pedestrian
         self.ped_safe_count = 0
-        self.ped_safe_count_buffer = 3
+        self.ped_safe_count_buffer = 5
 
         self.ped_lin_speed = 2.5 # linear speed of robot when crossing crosswalk
         self.ped_ang_speed = 0 # angular speed of robot when crossing crosswalk
@@ -59,8 +59,10 @@ class Driver():
 
         # Truck detection variables
         self.reached_truck = False
+        self.truck_min_area = 5000
         self.truck_buffer = 0.2 # how much to slow down when behind truck
         self.truck_turn = 1.3 # how much to turn left/right when at intersection
+        self.truck_init_cycle = 0
 
     # callback function for camera subscriber
     def callback(self, msg):
@@ -148,6 +150,7 @@ class Driver():
             error = 0
             print('no road detected, going to truck state')
             self.state = 'truck'
+            self.truck_init_cycle = self.cycle_count
         else:
             error = 0
         return error
@@ -269,10 +272,21 @@ class Driver():
             self.move.angular.z = angular
             self.vel_pub.publish(self.move)
 
-    def check_truck(self, img):
-        # TODO: check for truck in the image
-        # background subtract cropped image for right in front (with some buffer, wider than road)
-        return False
+    # returns true if it detects that the truck is big, if at intersection, returns contour area and mid x point
+    def check_truck(self, img, at_intersection=False):
+        fg_mask = self.bg_sub.apply(img)
+        contours, _ = cv2.findContours(fg_mask, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
+        if contours.__len__() == 0:
+            return 0, 0 if at_intersection else True
+        largest_contour = max(contours, key=cv2.contourArea)
+        x, y, w, h = cv2.boundingRect(largest_contour)
+
+        if at_intersection:
+            return cv2.contourArea(largest_contour), x + w // 2
+        elif cv2.contourArea(largest_contour) > self.truck_min_area:
+            return True
+        else:
+            return False
     
     def check_magenta(self, img):
         # TODO: check for magenta in the image
@@ -317,6 +331,7 @@ class Driver():
                         self.drive_robot(0.4, -1 * angle * 0.3)
                     else:
                         self.drive_robot(0.4, (90 - angle) * 0.3)
+                
                 # get close to crosswalk
                 while self.check_red(self.img, ret_y=True) < 400:
                     self.drive_robot(self.lin_speed, 0)
@@ -343,25 +358,28 @@ class Driver():
             elif self.state == 'truck':
                 # TODO: test truck state
                 self.drive_robot(0, 0)
-                rospy.sleep(3)
 
-                # intersection for first time, detects truck - wait and go right
-                if not self.reached_truck and self.check_truck(self.img):
-                    print('at intersection for first time and truck right there')
-                    while self.check_truck(self.img):
+                if not self.reached_truck:
+                    truck_area, truck_mid = self.check_truck(self.img, at_intersection=True)
+                    if self.cycle_count < self.truck_init_cycle + 5:
+                        print('too early to tell')
+                    elif truck_mid < self.img_width // 2 and truck_area > 600:
+                        print('truck close but on left, going right')
+                        self.drive_robot(self.lin_speed, -1 * self.truck_turn)
+                        self.reached_truck = True
+                        rospy.sleep(0.5)
+                    elif truck_area > 7000:
+                        print('truck is close, waiting...')
                         self.drive_robot(0, 0)
-                    self.reached_truck = True
-                    self.drive_robot(self.lin_speed, -1 * self.truck_turn)
-                
-                # intersection for first time, no truck - go left
-                elif not self.reached_truck and not self.check_truck(self.img):
-                    print('at intersection for first time, no truck')
-                    # go left
-                    self.drive_robot(self.lin_speed, self.truck_turn)
-                    self.reached_truck = True
+                        self.truck_action = 'wait'
+                    else:
+                        print('going left')
+                        self.drive_robot(self.lin_speed, self.truck_turn)
+                        self.reached_truck = True
+                        rospy.sleep(0.5)
                 
                 # driving, detects truck
-                elif self.reached_truck:
+                elif self.reached_truck and self.check_truck(self.img):
                     print('driving, found truck')
                     # slow down and but keep doing pid
                     error = self.kp * self.get_error(self.img)
