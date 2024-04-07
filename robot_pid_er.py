@@ -32,6 +32,10 @@ class Driver():
         self.kp = 11 # proportional gain for PID controller
         self.road_buffer = 200 # pixels above bottom of image to find road centre
         self.speed_buffer = 1.3 # buffer for gradual speed increase/decrease
+
+        self.accel_rate = 0.1 # velocity to increase by with each loop
+        self.decel_rate = 0.1 # velocity to decrease by with each loop
+        self.accel_freq = 50 # frequency of loop when increasing/decreasing speed
         
         # Pedestraian detection variables
         self.reached_crosswalk = False
@@ -40,9 +44,9 @@ class Driver():
         self.bg_sub = cv2.createBackgroundSubtractorMOG2()
         self.ped_buffer = 60 # lateral pixel buffer for pedestrian detection
 
-        self.ped_lin_speed = 2.2 # linear speed of robot when crossing crosswalk
+        self.ped_lin_speed = 2.5 # linear speed of robot when crossing crosswalk
         self.ped_ang_speed = 0 # angular speed of robot when crossing crosswalk
-        self.ped_sleep_time = 0.0 # time to sleep when crossing crosswalk
+        self.ped_sleep_time = 0.01 # time to sleep when crossing crosswalk
 
         # Truck detection variables
         self.reached_truck = False
@@ -220,28 +224,26 @@ class Driver():
         """
         # TODO: check if accel/decel is working
         if linear >  self.move.linear.x + self.speed_buffer:
+            rate = rospy.Rate(self.accel_freq)
             vel = self.move.linear.x
-            temp_counter = self.cycle_count
             while vel < linear:
-                if self.cycle_count > temp_counter:
-                    self.move.linear.x = vel
-                    self.move.angular.z = 0
-                    self.vel_pub.publish(self.move)
-                    vel += 0.25
-                    temp_counter = self.cycle_count
-                    print('speeding up')
+                self.move.linear.x = vel
+                self.move.angular.z = 0
+                self.vel_pub.publish(self.move)
+                vel += self.accel_rate
+                print('speeding up')
+                rate.sleep()
 
         elif linear < self.move.linear.x - self.speed_buffer:
             vel = self.move.linear.x
-            temp_counter = self.cycle_count
+            rate = rospy.Rate(self.accel_freq)
             while vel > linear:
-                if self.cycle_count > temp_counter:
-                    self.move.linear.x = vel
-                    self.move.angular.z = 0
-                    self.vel_pub.publish(self.move)
-                    vel -= 0.25
-                    temp_counter = self.cycle_count
-                    print('slowing down')
+                self.move.linear.x = vel
+                self.move.angular.z = 0
+                self.vel_pub.publish(self.move)
+                vel -= self.decel_rate
+                print('slowing down')
+                rate.sleep()
         else:
             self.move.linear.x  = linear
             self.move.angular.z = angular
@@ -277,7 +279,7 @@ class Driver():
             elif self.state == 'road':
                 if self.reached_crosswalk == False and self.check_red(self.img):
                     print('red detected, going to ped state')
-                    self.reached_crosswalk = True
+                    # self.reached_crosswalk = True
                     self.state = 'ped'
                 elif self.reached_truck and self.check_magenta(self.img):
                     print('magenta detected, going to desert state')
@@ -293,9 +295,9 @@ class Driver():
                 while 1 < self.check_red(self.img, ret_angle=True) < 89:
                     angle = self.check_red(self.img, ret_angle=True)
                     if angle < 45:
-                        self.drive_robot(self.lin_speed/3, -1 * angle * 0.3)
+                        self.drive_robot(0.4, -1 * angle * 0.3)
                     else:
-                        self.drive_robot(self.lin_speed/3, (90 - angle) * 0.3)
+                        self.drive_robot(0.4, (90 - angle) * 0.3)
                 print('red line straight')
                 while self.check_red(self.img, ret_y=True) < 400:
                     self.drive_robot(self.lin_speed, 0)
@@ -311,6 +313,7 @@ class Driver():
                     rospy.sleep(self.ped_sleep_time)
                     print('crossing crosswalk, going back to road pid state')
                     self.state = 'road'
+                self.reached_crosswalk = True
             
             # ------------- truck state -------------
             elif self.state == 'truck':
