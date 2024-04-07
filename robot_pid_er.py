@@ -357,9 +357,8 @@ class Driver():
             # ------------------- truck state --------------------
             elif self.state == 'truck':
                 # TODO: test truck state
-                self.drive_robot(0, 0)
-
                 if not self.reached_truck:
+                    self.drive_robot(0, 0)
                     truck_area, truck_mid = self.check_truck(self.img, at_intersection=True)
                     if self.cycle_count < self.truck_init_cycle + 5:
                         print('too early to tell')
