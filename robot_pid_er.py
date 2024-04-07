@@ -42,7 +42,16 @@ class Driver():
         self.red_line_min_area = 1000 # minimum contour area for red line
 
         self.bg_sub = cv2.createBackgroundSubtractorMOG2()
-        self.ped_buffer = 60 # lateral pixel buffer for pedestrian detection
+        self.ped_crop_x_min = 400 # values for cropping image to crosswalk and pedestrian
+        self.ped_crop_x_max = 920
+        self.ped_crop_y_min = 320
+        self.ped_crop_y_max = 440
+        
+        self.ped_left_buffer = 60 # lateral pixel buffers for pedestrian detection
+        self.ped_right_buffer = 80
+        self.ped_min_area = 400 # minimum contour area for detecting the pedestrian
+        self.ped_safe_count = 0
+        self.ped_safe_count_buffer = 3
 
         self.ped_lin_speed = 2.5 # linear speed of robot when crossing crosswalk
         self.ped_ang_speed = 0 # angular speed of robot when crossing crosswalk
@@ -60,7 +69,7 @@ class Driver():
         self.cycle_count += 1
         # print(f'cycle count: {self.cycle_count}')
 
-    def find_road_centre(self, img, y, ret_sides=False):
+    def find_road_centre(self, img, y, width, height, ret_sides=False):
         """
         Returns the centre of the road at y pixels above the bottom of the image in a thresholded 
         image where the road is outlined in white. If ret_sides is True, returns the left and 
@@ -79,10 +88,10 @@ class Driver():
                         of the road. If the road center cannot be determined, the function returns -1.
         """
         left_index = right_index = -1
-        for i in range(self.img_width):
-            if img[self.img_height - y, i] == 255 and left_index == -1:
+        for i in range(width):
+            if img[height - y, i] == 255 and left_index == -1:
                 left_index = i
-            elif img[self.img_height - y, i] == 255 and left_index != -1:
+            elif img[height - y, i] == 255 and left_index != -1:
                 right_index = i
 
         if ret_sides:
@@ -92,8 +101,8 @@ class Driver():
         if left_index != -1 and right_index != -1:
             if right_index - left_index > 150:
                 road_centre = (left_index + right_index) // 2
-            elif left_index < self.img_width // 2:
-                road_centre = (left_index + self.img_width) // 2
+            elif left_index < width // 2:
+                road_centre = (left_index + width) // 2
             else:
                 road_centre = right_index // 2
         else:
@@ -132,7 +141,7 @@ class Driver():
             # TODO: threshold desert image
             mask = cv2.inRange(img, (0, 0, 0), (255, 255, 255)) # to be changed
 
-        road_centre = self.find_road_centre(mask, self.road_buffer)
+        road_centre = self.find_road_centre(mask, self.road_buffer, self.img_width, self.img_height)
         if road_centre != -1:
             error = ((self.img_width // 2) - road_centre) / (self.img_width // 2)
         elif self.reached_crosswalk:
@@ -189,22 +198,36 @@ class Driver():
         Returns:
         bool: Returns True if a pedestrian is detected on the crosswalk or within the buffer, otherwise False.
         """
-        fg_mask = self.bg_sub.apply(img)
-
-        # cv2.imshow('camera feed', fg_mask)
-        # cv2.waitKey(1)
+        cropped_img = img[self.ped_crop_y_min:self.ped_crop_y_max, self.ped_crop_x_min:self.ped_crop_x_max]
+        height, width = cropped_img.shape[:2]
+        fg_mask = self.bg_sub.apply(cropped_img)
 
         contours, _ = cv2.findContours(fg_mask, cv2.RETR_TREE, cv2.CHAIN_APPROX_SIMPLE)
         if contours.__len__() == 0:
-            return True
+            return False
         largest_contour = max(contours, key=cv2.contourArea)
+
+        if cv2.contourArea(largest_contour) < self.ped_min_area:
+            return False
+
         x, y, w, h = cv2.boundingRect(largest_contour)
 
-        gray_img = cv2.cvtColor(img, cv2.COLOR_BGR2GRAY)
+        gray_img = cv2.cvtColor(cropped_img, cv2.COLOR_BGR2GRAY)
         white_mask = cv2.inRange(gray_img, 250, 255)
-        road_left, road_right = self.find_road_centre(white_mask, self.img_height-(y+h-1), ret_sides=True)
+        road_left, road_right = self.find_road_centre(white_mask, height-(y+h-1), width, height, ret_sides=True)
 
-        if road_left - self.ped_buffer < (x + w//2) < road_right + self.ped_buffer:
+        if road_left == -1 and road_right == -1:
+            return True
+
+        # cv2.rectangle(cropped_img, (x, y), (x+w, y+h), (0, 255, 0), 2)
+        # cv2.circle(cropped_img, (x + w//2, y + h), 5, (0, 0, 255), -1)
+        # cv2.circle(cropped_img, (road_left, y+h), 5, (0, 0, 255), -1)
+        # cv2.circle(cropped_img, (road_right, y+h), 5, (0, 0, 255), -1)
+        
+        # cv2.imshow('camera feed', np.hstack((cropped_img, cv2.cvtColor(fg_mask, cv2.COLOR_GRAY2BGR))))
+        # cv2.waitKey(1)
+        
+        if road_left - self.ped_left_buffer < (x + w//2) < road_right + self.ped_right_buffer:
             return True
         else:
             return False
@@ -222,7 +245,6 @@ class Driver():
         Returns:
         None
         """
-        # TODO: check if accel/decel is working
         if linear >  self.move.linear.x + self.speed_buffer:
             rate = rospy.Rate(self.accel_freq)
             vel = self.move.linear.x
@@ -231,7 +253,6 @@ class Driver():
                 self.move.angular.z = 0
                 self.vel_pub.publish(self.move)
                 vel += self.accel_rate
-                print('speeding up')
                 rate.sleep()
 
         elif linear < self.move.linear.x - self.speed_buffer:
@@ -242,7 +263,6 @@ class Driver():
                 self.move.angular.z = 0
                 self.vel_pub.publish(self.move)
                 vel -= self.decel_rate
-                print('slowing down')
                 rate.sleep()
         else:
             self.move.linear.x  = linear
@@ -271,15 +291,14 @@ class Driver():
             if self.img is None:
                 continue
             
-            # -------- initialization state --------
+            # --------------- initialization state ---------------
             elif self.state == 'init':
                 self.start()
 
-            # ------------- road state -------------
+            # -------------------- road state --------------------
             elif self.state == 'road':
                 if self.reached_crosswalk == False and self.check_red(self.img):
                     print('red detected, going to ped state')
-                    # self.reached_crosswalk = True
                     self.state = 'ped'
                 elif self.reached_truck and self.check_magenta(self.img):
                     print('magenta detected, going to desert state')
@@ -289,33 +308,38 @@ class Driver():
                     # print(error)
                     self.drive_robot(self.lin_speed, self.rot_speed * error)
 
-            # ---------- pedestrian state ----------
+            # ----------------- pedestrian state -----------------
             elif self.state == 'ped':
-                # TODO: test pedestrian state
+                # angle to be straight on with crosswalk
                 while 1 < self.check_red(self.img, ret_angle=True) < 89:
                     angle = self.check_red(self.img, ret_angle=True)
                     if angle < 45:
                         self.drive_robot(0.4, -1 * angle * 0.3)
                     else:
                         self.drive_robot(0.4, (90 - angle) * 0.3)
-                print('red line straight')
+                # get close to crosswalk
                 while self.check_red(self.img, ret_y=True) < 400:
                     self.drive_robot(self.lin_speed, 0)
-                    print('checked y')
-                print('red line close')
-                # self.drive_robot(0, 0)
-                # rospy.sleep(3)
+
+                self.drive_robot(0, 0)
+
                 if self.check_pedestrian(self.img):
-                    print('pedestrian detected, waiting...')
+                    # print('pedestrian detected, waiting...')
+                    self.ped_safe_count = 0
                 else:
-                    print('no pedestrian, going!')
-                    self.drive_robot(self.ped_lin_speed, self.ped_ang_speed)
-                    rospy.sleep(self.ped_sleep_time)
-                    print('crossing crosswalk, going back to road pid state')
-                    self.state = 'road'
-                self.reached_crosswalk = True
+                    self.ped_safe_count += 1
+                    if self.ped_safe_count > self.ped_safe_count_buffer:
+                        # print('no pedestrian, going!')
+                        self.drive_robot(self.ped_lin_speed, self.ped_ang_speed)
+                        rospy.sleep(self.ped_sleep_time)
+                        print('crossing crosswalk, going back to road pid state')
+                        self.state = 'road'
+                        self.reached_crosswalk = True
+                    else:
+                        # print('safe but too early')
+                        pass
             
-            # ------------- truck state -------------
+            # ------------------- truck state --------------------
             elif self.state == 'truck':
                 # TODO: test truck state
                 self.drive_robot(0, 0)
@@ -351,7 +375,7 @@ class Driver():
                     self.drive_robot(self.lin_speed, self.rot_speed * error)
 
 
-            # ------------ desert state -------------
+            # ------------------ desert state --------------------
             elif self.state == 'desert':
                 if self.check_magenta(self.img):
                     print('magenta detected, going to yoda state')
@@ -360,7 +384,7 @@ class Driver():
                     error = self.kp * self.get_error(self.img, road=False, desert=True)
                     self.drive_robot(self.lin_speed, self.rot_speed * error)
 
-            # -------------- yoda state --------------
+            # -------------------- yoda state --------------------
             elif self.state == 'yoda':
                 if self.check_magenta(self.img):
                     print('magenta detected, going back to desert state')
