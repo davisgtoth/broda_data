@@ -15,7 +15,7 @@ class Driver():
         rospy.Subscriber("/R1/pi_camera/image_raw", Image, self.callback)
         self.vel_pub = rospy.Publisher('/R1/cmd_vel', Twist, queue_size=1)
 
-        self.state = 'init' # init, road, ped, truck, desert, yoda, mountain
+        self.state = 'init' # init, road, ped, truck, desert, yoda, tunnel, mountain
         
         # image variables
         self.img = None
@@ -28,6 +28,10 @@ class Driver():
         self.move = Twist()
         self.lin_speed = 0.5 # defualt PID linear speed of robot
         self.rot_speed = 1.0 # base PID angular speed of robot
+
+        self.road_line_width = 150
+        self.road_min_white_val = 250
+        self.road_max_white_val = 255
         
         self.kp = 11 # proportional gain for PID controller
         self.road_buffer = 200 # pixels above bottom of image to find road centre
@@ -40,7 +44,12 @@ class Driver():
         # Pedestraian detection variables
         self.reached_crosswalk = False
         self.red_line_min_area = 1000 # minimum contour area for red line
-
+        self.red_line_approach_lin_vel = 0.4
+        self.red_line_approach_rot_vel = 0.3
+        self.red_line_min_angle = 1.0
+        self.red_line_max_angle = 89.0
+        self.red_line_stop_y = 400
+       
         self.bg_sub = cv2.createBackgroundSubtractorMOG2()
         self.ped_crop_x_min = 400 # values for cropping image to crosswalk and pedestrian
         self.ped_crop_x_max = 920
@@ -50,23 +59,44 @@ class Driver():
         self.ped_left_buffer = 60 # lateral pixel buffers for pedestrian detection
         self.ped_right_buffer = 80
         self.ped_min_area = 400 # minimum contour area for detecting the pedestrian
+                
         self.ped_safe_count = 0
         self.ped_safe_count_buffer = 5
-
+        
         self.ped_lin_speed = 2.5 # linear speed of robot when crossing crosswalk
         self.ped_ang_speed = 0 # angular speed of robot when crossing crosswalk
         self.ped_sleep_time = 0.01 # time to sleep when crossing crosswalk
 
         # Truck detection variables
         self.reached_truck = False
-        self.truck_min_area = 5000
-        self.truck_buffer = 0.0 # how much to slow down when behind truck
-        self.truck_turn = 1.3 # how much to turn left/right when at intersection
         self.truck_init_cycle = 0
+        self.truck_cycle_buffer = 15
+
+        self.truck_left_area = 600
+        self.truck_wait_area = 7000
+        
+        self.truck_min_area = 5000 # used in function, but never actually called, check later
+        
         self.truck_turn_dir = ''
+        self.truck_left_turn_amplifier = 1.2 # amplifies error when find no road to turn left
+        self.truck_right_kp = 11
+        self.truck_right_lin_speed = 0.7
+
+        self.truck_to_desert_sleep = 0.2 # time to go straight when transitioning from truck to desert states
 
         # Desert detection variables
         self.desert_min_arc_length = 750 
+        self.desert_line_cnt_min_height = 125
+        
+        self.desert_min_magenta_area = 8000
+        self.desert_past_magenta_line_area = 1000
+        
+        self.desert_road_buffer = 250
+
+        self.magneta_min_angle = 0.5
+        self.magneta_max_angle = 89.5
+        self.magenta_angle_lin_speed = 0.2
+        self.magenta_angle_rot_speed = 0.3
 
         # Yoda detection variables
         self.reached_yoda = False
@@ -76,7 +106,6 @@ class Driver():
         self.img = self.bridge.imgmsg_to_cv2(msg, 'bgr8')
         self.img_height, self.img_width = self.img.shape[:2]
         self.cycle_count += 1
-        # print(f'cycle count: {self.cycle_count}')
 
     def find_road_centre(self, img, y, width, height, ret_sides=False):
         """
@@ -108,7 +137,7 @@ class Driver():
 
         road_centre = -1
         if left_index != -1 and right_index != -1:
-            if right_index - left_index > 150:
+            if right_index - left_index > self.road_line_width:
                 road_centre = (left_index + right_index) // 2
             elif left_index < width // 2:
                 road_centre = (left_index + width) // 2
@@ -145,10 +174,10 @@ class Driver():
         """
         if self.state == 'road' or self.state == 'truck':
             gray_img = cv2.cvtColor(img, cv2.COLOR_BGR2GRAY)
-            mask = cv2.inRange(gray_img, 250, 255)
+            mask = cv2.inRange(gray_img, self.road_min_white_val, self.road_max_white_val)
         elif self.state == 'desert':
             mask = cv2.cvtColor(self.thresh_desert(img), cv2.COLOR_BGR2GRAY)
-            self.road_buffer = 250
+            self.road_buffer = self.desert_road_buffer
             # cv2.imshow('desert mask', cv2.resize(mask, (self.img_width // 2, self.img_height // 2)))
             # cv2.waitKey(1)
 
@@ -161,7 +190,7 @@ class Driver():
             self.state = 'truck'
             self.truck_init_cycle = self.cycle_count
         elif self.truck_turn_dir == 'left':
-            error = 1.2 * ((self.img_width // 2) - (self.img_width // 4)) / (self.img_width // 2)
+            error = self.truck_left_turn_amplifier * ((self.img_width // 2) - (self.img_width // 4)) / (self.img_width // 2)
         elif self.truck_turn_dir == 'right':
             error = ((self.img_width // 2) - (3 * self.img_width // 4)) / (self.img_width // 2)
         else:
@@ -229,8 +258,9 @@ class Driver():
         x, y, w, h = cv2.boundingRect(largest_contour)
 
         gray_img = cv2.cvtColor(cropped_img, cv2.COLOR_BGR2GRAY)
-        white_mask = cv2.inRange(gray_img, 250, 255)
-        road_left, road_right = self.find_road_centre(white_mask, height-(y+h-1), width, height, ret_sides=True)
+        white_mask = cv2.inRange(gray_img, self.road_min_white_val, self.road_max_white_val)
+        ped_height_from_bottom = height - (y + h - 1)
+        road_left, road_right = self.find_road_centre(white_mask, ped_height_from_bottom, width, height, ret_sides=True)
 
         if road_left == -1 and road_right == -1:
             return True
@@ -299,6 +329,8 @@ class Driver():
 
         if at_intersection:
             return cv2.contourArea(largest_contour), x + w // 2
+        
+        # TODO: check if this is used, don't think it is
         elif cv2.contourArea(largest_contour) > self.truck_min_area:
             return True
         else:
@@ -335,11 +367,11 @@ class Driver():
             if ret_angle:
                 return rect[2]
             elif ret_y:
-                if cv2.contourArea(largest_contour) < 1000:
+                if cv2.contourArea(largest_contour) < self.desert_past_magenta_line_area:
                     return self.img_height -1
                 else:
                     return rect[0][1]
-            elif cv2.contourArea(largest_contour) > 8000:
+            elif cv2.contourArea(largest_contour) > self.desert_min_magenta_area:
                 return True
             else:
                 return False
@@ -356,7 +388,7 @@ class Driver():
         contours, _ = cv2.findContours(mask, cv2.RETR_TREE, cv2.CHAIN_APPROX_SIMPLE)
         contours = sorted(contours, key=lambda contour: cv2.arcLength(contour, True), reverse=True)
         contours = [cnt for cnt in contours if cv2.arcLength(cnt, True) > self.desert_min_arc_length 
-                    and cv2.boundingRect(cnt)[3] > 125 ]
+                    and cv2.boundingRect(cnt)[3] > self.desert_line_cnt_min_height ]
         if len(contours) == 0:
                     return np.zeros_like(img)
         epsilon = 0.01 * cv2.arcLength(contours[0], True)
@@ -400,15 +432,15 @@ class Driver():
             # ----------------- pedestrian state -----------------
             elif self.state == 'ped':
                 # angle to be straight on with crosswalk
-                while 1 < self.check_red(self.img, ret_angle=True) < 89:
+                while self.red_line_min_angle < self.check_red(self.img, ret_angle=True) < self.red_line_max_angle:
                     angle = self.check_red(self.img, ret_angle=True)
                     if angle < 45:
-                        self.drive_robot(0.4, -1 * angle * 0.3)
+                        self.drive_robot(self.red_line_approach_lin_vel, -1 * angle * self.red_line_approach_rot_vel)
                     else:
-                        self.drive_robot(0.4, (90 - angle) * 0.3)
+                        self.drive_robot(self.red_line_approach_lin_vel, (90 - angle) * self.red_line_approach_rot_vel)
                 
                 # get close to crosswalk
-                while self.check_red(self.img, ret_y=True) < 400:
+                while self.check_red(self.img, ret_y=True) < self.red_line_stop_y:
                     self.drive_robot(self.lin_speed, 0)
 
                 self.drive_robot(0, 0)
@@ -425,39 +457,30 @@ class Driver():
                         print('crossing crosswalk, going back to road pid state')
                         self.state = 'road'
                         self.reached_crosswalk = True
-                    else:
-                        # print('safe but too early')
-                        pass
             
             # ------------------- truck state --------------------
             elif self.state == 'truck':
                 if not self.reached_truck:
                     self.drive_robot(0, 0)
                     truck_area, truck_mid = self.check_truck(self.img, at_intersection=True)
-                    if self.cycle_count < self.truck_init_cycle + 15:
+                    if self.cycle_count < self.truck_init_cycle + self.truck_cycle_buffer:
                         # print('too early to tell')
                         pass
-                    elif truck_mid < self.img_width // 2 and truck_area > 600:
+                    elif truck_mid < self.img_width // 2 and truck_area > self.truck_left_area:
                         print('truck close but on left, going right')
                         self.truck_turn_dir = 'right'
-                        # self.drive_robot(self.lin_speed, -1 * self.truck_turn)
                         self.reached_truck = True
-                        # rospy.sleep(0.5)
-                    elif truck_area > 7000:
+                    elif truck_area > self.truck_wait_area:
                         print('truck is close, waiting...')
                         self.drive_robot(0, 0)
-                        self.truck_action = 'wait'
+                        self.truck_turn_dir = 'wait'
                     else:
                         print('going left')
                         self.truck_turn_dir = 'left'
-                        # self.drive_robot(self.lin_speed + 0.2, self.truck_turn)
                         self.reached_truck = True
-                        # rospy.sleep(0.5)
                 elif self.truck_turn_dir == 'right':
-                    # print('driving')
-                    # regular road pid
-                    error = (self.kp + 1) * self.get_error(self.img)
-                    self.drive_robot(self.lin_speed + 0.2, self.rot_speed * error)
+                    error = self.truck_right_kp * self.get_error(self.img)
+                    self.drive_robot(self.truck_right_lin_speed, self.rot_speed * error)
                 else:
                     error = self.kp * self.get_error(self.img)
                     self.drive_robot(self.lin_speed, self.rot_speed * error)
@@ -466,23 +489,23 @@ class Driver():
                     print('magenta detected, going to desert state')
                     self.state = 'desert'
                     self.drive_robot(self.lin_speed, 0)
-                    rospy.sleep(0.2)
+                    rospy.sleep(self.truck_to_desert_sleep)
 
             # ------------------ desert state --------------------
             elif self.state == 'desert':
                 if self.check_magenta(self.img):
                     self.drive_robot(0, 0)
                     print('detected magenta')
-                    while 0.5 < self.check_magenta(self.img, ret_angle=True) < 89.5:
+                    while self.magneta_min_angle < self.check_magenta(self.img, ret_angle=True) < self.magneta_max_angle:
                         angle = self.check_magenta(self.img, ret_angle=True)
                         if angle < 45:
-                            self.drive_robot(0.2, -1 * angle * 0.3)
+                            self.drive_robot(self.magenta_angle_lin_speed, -1 * angle * self.magenta_angle_rot_speed)
                         else:
-                            self.drive_robot(0.2, (90 - angle) * 0.3)
+                            self.drive_robot(self.magenta_angle_lin_speed, (90 - angle) * self.magenta_angle_rot_speed)
 
                     print('done angling, moving closer')
                     while self.check_magenta(self.img, ret_y=True) < self.img_height - 10:
-                        self.drive_robot(0.2, 0)
+                        self.drive_robot(self.magenta_angle_lin_speed, 0)
                    
                     self.drive_robot(0, 0)
                     print('going to yoda state')
@@ -512,9 +535,13 @@ class Driver():
                 #     # hard code to go over hill, pid to something else?
                 #     pass
 
-            # ------------------ mountain state ------------------
-            elif self.state == 'mountain':
+            # ------------------ tunnel state ------------------
+            elif self.state == 'tunnel':
                 # new thresholding different thresholidng i think?
+                pass
+
+            # ----------------- mountain state -----------------
+            elif self.state == 'mountain':
                 pass
         
         # rospy.sleep(0.1)
