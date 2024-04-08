@@ -15,7 +15,7 @@ class Driver():
         rospy.Subscriber("/R1/pi_camera/image_raw", Image, self.callback)
         self.vel_pub = rospy.Publisher('/R1/cmd_vel', Twist, queue_size=1)
 
-        self.state = 'init' # init, road, ped, truck, desert, yoda 
+        self.state = 'init' # init, road, ped, truck, desert, yoda, mountain
         
         # image variables
         self.img = None
@@ -66,7 +66,10 @@ class Driver():
         self.truck_turn_dir = ''
 
         # Desert detection variables
-        self.desert_min_arc_length = 750
+        self.desert_min_arc_length = 750 
+
+        # Yoda detection variables
+        self.reached_yoda = False
 
     # callback function for camera subscriber
     def callback(self, msg):
@@ -145,8 +148,9 @@ class Driver():
             mask = cv2.inRange(gray_img, 250, 255)
         elif self.state == 'desert':
             mask = cv2.cvtColor(self.thresh_desert(img), cv2.COLOR_BGR2GRAY)
-            cv2.imshow('desert mask', mask)
-            cv2.waitKey(1)
+            self.road_buffer = 250
+            # cv2.imshow('desert mask', cv2.resize(mask, (self.img_width // 2, self.img_height // 2)))
+            # cv2.waitKey(1)
 
         road_centre = self.find_road_centre(mask, self.road_buffer, self.img_width, self.img_height)
         if road_centre != -1:
@@ -301,7 +305,7 @@ class Driver():
             return False
     
     # returns true if there is magenta at or below the point where we detect for road lines
-    def check_magenta(self, img):
+    def check_magenta(self, img, ret_angle=False, ret_y=False):
         uh_mag = 175; us_mag = 255; uv_mag = 255
         lh_mag = 150; ls_mag = 90; lv_mag = 110
         lower_hsv_mag = np.array([lh_mag, ls_mag, lv_mag])
@@ -312,14 +316,33 @@ class Driver():
 
         contours, _ = cv2.findContours(magenta_mask, cv2.RETR_TREE, cv2.CHAIN_APPROX_SIMPLE)
         if contours.__len__() == 0:
-            return False
+            if not ret_angle and not ret_y:
+                return False
+            elif ret_angle:
+                return 0
+            elif ret_y:
+                return self.img_height - 1
         largest_contour = max(contours, key=cv2.contourArea)
-        x, y, w, h = cv2.boundingRect(largest_contour)
 
-        if y >= self.img_height - self.road_buffer:
-            return True
-        else: 
-            return False
+        if self.state == 'truck':
+            x, y, w, h = cv2.boundingRect(largest_contour)
+            if y >= self.img_height - self.road_buffer:
+                return True
+            else: 
+                return False
+        elif self.state == 'desert':
+            rect = cv2.minAreaRect(largest_contour)
+            if ret_angle:
+                return rect[2]
+            elif ret_y:
+                if cv2.contourArea(largest_contour) < 1000:
+                    return self.img_height -1
+                else:
+                    return rect[0][1]
+            elif cv2.contourArea(largest_contour) > 8000:
+                return True
+            else:
+                return False
 
     def thresh_desert(self, img):
         uh = 37; us = 98; uv = 255
@@ -332,8 +355,10 @@ class Driver():
 
         contours, _ = cv2.findContours(mask, cv2.RETR_TREE, cv2.CHAIN_APPROX_SIMPLE)
         contours = sorted(contours, key=lambda contour: cv2.arcLength(contour, True), reverse=True)
-        contours = [cnt for cnt in contours if cv2.arcLength(cnt, True) > self.desert_min_arc_length and cv2.boundingRect(cnt)[3] > 150]
-
+        contours = [cnt for cnt in contours if cv2.arcLength(cnt, True) > self.desert_min_arc_length 
+                    and cv2.boundingRect(cnt)[3] > 125 ]
+        if len(contours) == 0:
+                    return np.zeros_like(img)
         epsilon = 0.01 * cv2.arcLength(contours[0], True)
         approx_cnts = [cv2.approxPolyDP(cnt, epsilon, True) for cnt in contours]
 
@@ -346,8 +371,8 @@ class Driver():
     def start(self):
         # start the timer
         print('starting timer, entering road pid state')
-        # self.state = 'road'
-        self.state = 'desert'
+        self.state = 'road'
+        # self.state = 'desert'
     
     # main loop for the driver
     def run(self):
@@ -406,13 +431,13 @@ class Driver():
             
             # ------------------- truck state --------------------
             elif self.state == 'truck':
-                # TODO: test truck state
                 if not self.reached_truck:
                     self.drive_robot(0, 0)
                     truck_area, truck_mid = self.check_truck(self.img, at_intersection=True)
                     if self.cycle_count < self.truck_init_cycle + 15:
-                        print('too early to tell')
-                    elif truck_mid < self.img_width // 2 and truck_area > 700:
+                        # print('too early to tell')
+                        pass
+                    elif truck_mid < self.img_width // 2 and truck_area > 600:
                         print('truck close but on left, going right')
                         self.truck_turn_dir = 'right'
                         # self.drive_robot(self.lin_speed, -1 * self.truck_turn)
@@ -428,17 +453,6 @@ class Driver():
                         # self.drive_robot(self.lin_speed + 0.2, self.truck_turn)
                         self.reached_truck = True
                         # rospy.sleep(0.5)
-                
-                # driving, detects truck
-                # elif self.reached_truck and self.check_truck(self.img):
-                #     print('driving, found truck')
-                #     # slow down and but keep doing pid
-                #     error = self.kp * self.get_error(self.img)
-                #     self.drive_robot(self.lin_speed - self.truck_buffer, self.rot_speed * error)
-                
-
-
-                # driving, no truck
                 elif self.truck_turn_dir == 'right':
                     # print('driving')
                     # regular road pid
@@ -451,27 +465,57 @@ class Driver():
                 if self.check_magenta(self.img):
                     print('magenta detected, going to desert state')
                     self.state = 'desert'
-
+                    self.drive_robot(self.lin_speed, 0)
+                    rospy.sleep(0.2)
 
             # ------------------ desert state --------------------
             elif self.state == 'desert':
-                # self.drive_robot(0, 0)
-                # if self.check_magenta(self.img):
-                #     print('magenta detected, going to yoda state')
-                #     self.state = 'yoda'
-                # else:
-                #     error = self.kp * self.get_error(self.img, road=False, desert=True)
-                #     self.drive_robot(self.lin_speed, self.rot_speed * error)
-                error = (self.kp) * self.get_error(self.img)
-                self.drive_robot(self.lin_speed - 0.2, self.rot_speed * error)
+                if self.check_magenta(self.img):
+                    self.drive_robot(0, 0)
+                    print('detected magenta')
+                    while 0.5 < self.check_magenta(self.img, ret_angle=True) < 89.5:
+                        angle = self.check_magenta(self.img, ret_angle=True)
+                        if angle < 45:
+                            self.drive_robot(0.2, -1 * angle * 0.3)
+                        else:
+                            self.drive_robot(0.2, (90 - angle) * 0.3)
+
+                    print('done angling, moving closer')
+                    while self.check_magenta(self.img, ret_y=True) < self.img_height - 10:
+                        self.drive_robot(0.2, 0)
+                   
+                    self.drive_robot(0, 0)
+                    print('going to yoda state')
+                    self.state = 'yoda'
+                else:
+                    error = (self.kp) * self.get_error(self.img)
+                    self.drive_robot(self.lin_speed, self.rot_speed * error)
 
             # -------------------- yoda state --------------------
             elif self.state == 'yoda':
-                if self.check_magenta(self.img):
-                    print('magenta detected, going back to desert state')
-                else:
-                    # hard code to go over hill, pid to something else?
-                    pass
+                # self.drive_robot(0.1, 0.5)
+                self.drive_robot(0, 0)
+                
+                # if not self.reached_yoda:
+                #     self.drive_robot(0.5, 1.6)
+                #     rospy.sleep(1)
+                #     self.reached_yoda = True
+                #     self.drive_robot(1.5, 0)
+                #     rospy.sleep(2)
+                # else: 
+                #     print('stopping')
+                #     self.drive_robot(0, 0)
+
+                # if self.check_magenta(self.img):
+                #     print('magenta detected, going back to desert state')
+                # else:
+                #     # hard code to go over hill, pid to something else?
+                #     pass
+
+            # ------------------ mountain state ------------------
+            elif self.state == 'mountain':
+                # new thresholding different thresholidng i think?
+                pass
         
         # rospy.sleep(0.1)
 
