@@ -3,25 +3,25 @@
 import cv2
 import numpy as np
 
-imgs = [cv2.imread(f'road_images_1/img_{i}.jpg') for i in range(21)]
+# imgs = [cv2.imread(f'road_images_1/img_{i}.jpg') for i in range(21)]
 
-uh = 255
-us = 20
-uv = 255
-lh = 0
-ls = 0
-lv = 220
+# uh = 255
+# us = 20
+# uv = 255
+# lh = 0
+# ls = 0
+# lv = 220
 
-lower_hsv = np.array([lh,ls,lv])
-upper_hsv = np.array([uh,us,uv])
+# lower_hsv = np.array([lh,ls,lv])
+# upper_hsv = np.array([uh,us,uv])
 
-for image in imgs:
-    height, width = image.shape[:2]
-    image = cv2.resize(image, (int(width/2), int(height/2)))
-    hsv_img = cv2.cvtColor(image, cv2.COLOR_BGR2HSV)
-    mask = cv2.inRange(hsv_img, lower_hsv, upper_hsv)
-    gray_img = cv2.cvtColor(image, cv2.COLOR_BGR2GRAY)
-    white_mask = cv2.inRange(gray_img, 250, 255)
+# for image in imgs:
+#     height, width = image.shape[:2]
+#     image = cv2.resize(image, (int(width/2), int(height/2)))
+#     hsv_img = cv2.cvtColor(image, cv2.COLOR_BGR2HSV)
+#     mask = cv2.inRange(hsv_img, lower_hsv, upper_hsv)
+#     gray_img = cv2.cvtColor(image, cv2.COLOR_BGR2GRAY)
+#     white_mask = cv2.inRange(gray_img, 250, 255)
     # cv2.imshow('white mask ----------- original image ----------- hsv mask', 
     #            np.hstack((cv2.cvtColor(white_mask, cv2.COLOR_GRAY2BGR), image, 
     #                       cv2.cvtColor(mask, cv2.COLOR_GRAY2BGR))))
@@ -89,16 +89,189 @@ def check_red(img):
     
 
 
+# for image in imgs:
+#     print('--- new image ---')
+#     print(check_red(image))
+#     # height, width = image.shape[:2]
+#     # road_centre_1 = find_road_centre(image, 50)
+#     # road_centre_2 = find_road_centre(image, 100)
+#     # road_centre_3 = find_road_centre(image, 150)
+#     # image = cv2.circle(image, (road_centre_1, height-50), 5, (0, 0, 255), -1)
+#     # image = cv2.circle(image, (road_centre_2, height-100), 5, (0, 0, 255), -1)
+#     # image = cv2.circle(image, (road_centre_3, height-150), 5, (0, 0, 255), -1)
+#     # image = cv2.line(image, (width // 2, 0), (width // 2, height), (0, 255, 0), 2)
+#     cv2.imshow('image', image)
+#     cv2.waitKey(0)
+
+def check_magenta(img):
+    height, width = img.shape[:2]
+    cv2.line(img, (0, height-200), (width, height-200), (0, 255, 0), 2)
+
+    uh_mag = 175; us_mag = 255; uv_mag = 255
+    lh_mag = 150; ls_mag = 90; lv_mag = 110
+    lower_hsv_mag = np.array([lh_mag, ls_mag, lv_mag])
+    upper_hsv_mag = np.array([uh_mag, us_mag, uv_mag])
+
+    hsv_img = cv2.cvtColor(img, cv2.COLOR_BGR2HSV)
+    magenta_mask = cv2.inRange(hsv_img, lower_hsv_mag, upper_hsv_mag)
+
+    # cv2.imshow('magenta mask', magenta_mask)
+    # cv2.waitKey(0)
+
+    contours, _ = cv2.findContours(magenta_mask, cv2.RETR_TREE, cv2.CHAIN_APPROX_SIMPLE)
+    if contours.__len__() == 0:
+        print('no magenta detected')
+        return False
+    largest_contour = max(contours, key=cv2.contourArea)
+    # print(cv2.contourArea(largest_contour))
+    x, y, w, h = cv2.boundingRect(largest_contour)
+    cv2.rectangle(img, (x, y), (x+w, y+h), (0, 255, 0), 2)
+
+    # if y >= height - 200:
+    #     print('magenta detected, going to desert state')
+    # else:
+    #     print('staying in road state')
+
+    # cv2.imshow('image', img)
+    # cv2.waitKey(0)
+
+
+# for i in range(5):
+#     image = cv2.imread(f'img_{i}.jpg')
+#     check_magenta(image)
+
+imgs = [cv2.imread(f'desert_images_1/img_{i}.jpg') for i in range(14)]
+# height, width = imgs[0].shape[:2]
+# imgs = [cv2.resize(img, (width // 3, height // 3)) for img in imgs]
+# ho1 = np.hstack((imgs[13], imgs[1], imgs[2], imgs[3]))
+# ho2 = np.hstack((imgs[4], imgs[5], imgs[6], imgs[7]))
+# ho3 = np.hstack((imgs[8], imgs[9], imgs[10], imgs[11]))
+# img_array = np.vstack((ho1, ho2, ho3))
+# cv2.imshow('road images', img_array)
+# cv2.waitKey(0)
+
+# cv2.imwrite('desert_images_1/desert_array.jpg', img_array)
+
 for image in imgs:
-    print('--- new image ---')
-    print(check_red(image))
-    # height, width = image.shape[:2]
-    # road_centre_1 = find_road_centre(image, 50)
-    # road_centre_2 = find_road_centre(image, 100)
-    # road_centre_3 = find_road_centre(image, 150)
-    # image = cv2.circle(image, (road_centre_1, height-50), 5, (0, 0, 255), -1)
-    # image = cv2.circle(image, (road_centre_2, height-100), 5, (0, 0, 255), -1)
-    # image = cv2.circle(image, (road_centre_3, height-150), 5, (0, 0, 255), -1)
-    # image = cv2.line(image, (width // 2, 0), (width // 2, height), (0, 255, 0), 2)
-    cv2.imshow('image', image)
+    # print('--- new image ---')
+    # image = cv2.GaussianBlur(image, (5, 5), 0)
+    gray_img = cv2.cvtColor(image, cv2.COLOR_BGR2GRAY)
+    # cv2.imshow('gray image', gray_img)
+
+    # adaptive_thresh = cv2.adaptiveThreshold(gray_img, 255, cv2.ADAPTIVE_THRESH_GAUSSIAN_C, cv2.THRESH_BINARY, 11, 2)
+    # cv2.imshow('adaptive threshold 1', adaptive_thresh)
+
+    # adaptive_thresh = cv2.adaptiveThreshold(gray_img, 255, cv2.ADAPTIVE_THRESH_GAUSSIAN_C, cv2.THRESH_BINARY, 11, 4)
+    # cv2.imshow('adaptive threshold 2', adaptive_thresh)
+
+    adaptive_thresh = cv2.adaptiveThreshold(gray_img, 255, cv2.ADAPTIVE_THRESH_GAUSSIAN_C, cv2.THRESH_BINARY, 21, 6)
+    # cv2.imshow('adaptive threshold 3', adaptive_thresh)
+
+    kernel = np.ones((3, 3), np.uint8)
+    opening = cv2.morphologyEx(adaptive_thresh, cv2.MORPH_OPEN, kernel)
+    # cv2.imshow('opening', opening)
+
+    # edges = cv2.Canny(image, 100, 200)
+    # cv2.imshow('canny edge detection', edges)
+
+    # white_mask = cv2.inRange(gray_img, 170, 200)
+    # cv2.imshow('white mask', white_mask)
+    
+    uh = 37; us = 98; uv = 255
+    lh = 13; ls = 35; lv = 179
+    lower_hsv = np.array([lh, ls, lv])
+    upper_hsv = np.array([uh, us, uv])
+
+    hsv_img = cv2.cvtColor(image, cv2.COLOR_BGR2HSV)
+    mask = cv2.inRange(hsv_img, lower_hsv, upper_hsv)
+    # cv2.imshow('first mask', mask)
+
+    # uh2 = 37; us2 = 98; uv2 = 255
+    # lh2 = 13; ls2 = 94; lv2 = 175
+    # lower_hsv2 = np.array([lh2, ls2, lv2])
+    # upper_hsv2 = np.array([uh2, us2, uv2])
+    # mask2 = cv2.inRange(hsv_img, lower_hsv2, upper_hsv2)
+
+    # mask2 = cv2.bitwise_not(mask2)
+    # mask = cv2.bitwise_and(mask, mask2)
+
+    # kernel = np.ones((3, 3), np.uint8)
+    # mask = cv2.erode(mask, kernel, iterations=1)
+    # mask = cv2.dilate(mask, kernel, iterations=1)
+
+    # mask = cv2.bitwise_and(mask, white_mask)
+
+    contours, _ = cv2.findContours(mask, cv2.RETR_TREE, cv2.CHAIN_APPROX_SIMPLE)
+    # for contour in contours:
+    #     x, y, w, h = cv2.boundingRect(contour)
+    #     cv2.rectangle(image, (x, y), (x+w, y+h), (0, 255, 0), 2)
+
+    # contours = sorted(contours, key=cv2.arcLength, reverse=True)
+
+
+    # contours = sorted(contours, key=lambda contour: cv2.arcLength(contour, True), reverse=True)
+    # largest_contours = contours[:5]
+    min_perimeter = 750  # Replace with your desired minimum perimeter
+    contours = [contour for contour in contours if cv2.arcLength(contour, True) > min_perimeter]
+    
+    # good_contours = []
+    # for cnt in contours:
+    #     x, y, w, h = cv2.boundingRect(cnt)
+    #     cv2.rectangle(image, (x, y), (x+w, y+h), (0, 255, 0), 2)
+    #     if h > 125:
+    #         good_contours.append(cnt)
+
+    good_contours = [cnt for cnt in contours if cv2.boundingRect(cnt)[3] > 125]
+
+
+    largest_contours = contours[:2]
+
+    epsilon = 0.01 * cv2.arcLength(good_contours[0], True)
+    approx = [cv2.approxPolyDP(contour, epsilon, True) for contour in good_contours]
+
+    # cv2.drawContours(image, approx, -1, (0, 255, 0), 2)
+    
+    height, width = image.shape[:2]
+    # cv2.rectangle(image, (0, height-200), (width, height), (0, 255, 0), 2)
+
+
+    # cv2.imshow('original image', image)
+
+    # blank_image = np.zeros((height, width, 3), np.uint8)
+    blank_image = np.zeros_like(image)
+    cv2.fillPoly(blank_image, approx, (255, 255, 255))
+    # cv2.imshow('blank image', cv2.cvtColor(blank_image, cv2.COLOR_BGR2GRAY))
+
+    # cv2.imshow('mask', mask)
+    # cv2.waitKey(0)
+
+def thresh_desert(img):
+        uh = 37; us = 98; uv = 255
+        lh = 13; ls = 35; lv = 179
+        lower_hsv = np.array([lh, ls, lv])
+        upper_hsv = np.array([uh, us, uv])
+
+        hsv_img = cv2.cvtColor(img, cv2.COLOR_BGR2HSV)
+        mask = cv2.inRange(hsv_img, lower_hsv, upper_hsv)
+
+        contours, _ = cv2.findContours(mask, cv2.RETR_TREE, cv2.CHAIN_APPROX_SIMPLE)
+        # contours = sorted(contours, key=lambda contour: cv2.arcLength(contour, True), reverse=True)
+        contours = [cnt for cnt in contours if cv2.arcLength(cnt, True) > 750 and cv2.boundingRect(cnt)[3] > 125]
+
+        if len(contours) == 0:
+            print('no contours')
+            return np.zeros_like(img)
+
+        epsilon = 0.01 * cv2.arcLength(contours[0], True)
+        approx_cnts = [cv2.approxPolyDP(cnt, epsilon, True) for cnt in contours]
+
+        blank_img = np.zeros_like(img)
+
+        return cv2.fillPoly(blank_img, approx_cnts, (255, 255, 255))
+
+for image in imgs:
+    lines = thresh_desert(image)
+    lines = cv2.resize(lines, (lines.shape[1]//2, lines.shape[0]//2))
+    image = cv2.resize(image, (image.shape[1]//2, image.shape[0]//2))
+    cv2.imshow('lines and original image', np.hstack((lines, image)))
     cv2.waitKey(0)

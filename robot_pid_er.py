@@ -60,9 +60,13 @@ class Driver():
         # Truck detection variables
         self.reached_truck = False
         self.truck_min_area = 5000
-        self.truck_buffer = 0.2 # how much to slow down when behind truck
+        self.truck_buffer = 0.0 # how much to slow down when behind truck
         self.truck_turn = 1.3 # how much to turn left/right when at intersection
         self.truck_init_cycle = 0
+        self.truck_turn_dir = ''
+
+        # Desert detection variables
+        self.desert_min_arc_length = 750
 
     # callback function for camera subscriber
     def callback(self, msg):
@@ -120,7 +124,7 @@ class Driver():
     # for either a road or desert image, default is road
     # returns error of 0 if no road lines are found on either side
     # enters the truck state if no road is detected and have reached the crosswalk
-    def get_error(self, img, road=True, desert=False):
+    def get_error(self, img):
         """
         Returns the error between the centre of the road and the centre of a thresholded image
         for either a road or desert image, default is road. Returns error of 0 if no road lines 
@@ -136,21 +140,26 @@ class Driver():
         float: The error between the centre of the road and the centre of the image. Returns 0 if no 
         road lines are found on either side.
         """
-        if road:
+        if self.state == 'road' or self.state == 'truck':
             gray_img = cv2.cvtColor(img, cv2.COLOR_BGR2GRAY)
             mask = cv2.inRange(gray_img, 250, 255)
-        elif desert:
-            # TODO: threshold desert image
-            mask = cv2.inRange(img, (0, 0, 0), (255, 255, 255)) # to be changed
+        elif self.state == 'desert':
+            mask = cv2.cvtColor(self.thresh_desert(img), cv2.COLOR_BGR2GRAY)
+            cv2.imshow('desert mask', mask)
+            cv2.waitKey(1)
 
         road_centre = self.find_road_centre(mask, self.road_buffer, self.img_width, self.img_height)
         if road_centre != -1:
             error = ((self.img_width // 2) - road_centre) / (self.img_width // 2)
-        elif self.reached_crosswalk:
+        elif self.reached_crosswalk and not self.reached_truck:
             error = 0
             print('no road detected, going to truck state')
             self.state = 'truck'
             self.truck_init_cycle = self.cycle_count
+        elif self.truck_turn_dir == 'left':
+            error = 1.2 * ((self.img_width // 2) - (self.img_width // 4)) / (self.img_width // 2)
+        elif self.truck_turn_dir == 'right':
+            error = ((self.img_width // 2) - (3 * self.img_width // 4)) / (self.img_width // 2)
         else:
             error = 0
         return error
@@ -281,6 +290,9 @@ class Driver():
         largest_contour = max(contours, key=cv2.contourArea)
         x, y, w, h = cv2.boundingRect(largest_contour)
 
+        # cv2.imshow('fg mask', fg_mask)
+        # cv2.waitKey(1)
+
         if at_intersection:
             return cv2.contourArea(largest_contour), x + w // 2
         elif cv2.contourArea(largest_contour) > self.truck_min_area:
@@ -288,16 +300,54 @@ class Driver():
         else:
             return False
     
+    # returns true if there is magenta at or below the point where we detect for road lines
     def check_magenta(self, img):
-        # TODO: check for magenta in the image
-        # check for magenta in the image
-        return False
+        uh_mag = 175; us_mag = 255; uv_mag = 255
+        lh_mag = 150; ls_mag = 90; lv_mag = 110
+        lower_hsv_mag = np.array([lh_mag, ls_mag, lv_mag])
+        upper_hsv_mag = np.array([uh_mag, us_mag, uv_mag])
+
+        hsv_img = cv2.cvtColor(img, cv2.COLOR_BGR2HSV)
+        magenta_mask = cv2.inRange(hsv_img, lower_hsv_mag, upper_hsv_mag)
+
+        contours, _ = cv2.findContours(magenta_mask, cv2.RETR_TREE, cv2.CHAIN_APPROX_SIMPLE)
+        if contours.__len__() == 0:
+            return False
+        largest_contour = max(contours, key=cv2.contourArea)
+        x, y, w, h = cv2.boundingRect(largest_contour)
+
+        if y >= self.img_height - self.road_buffer:
+            return True
+        else: 
+            return False
+
+    def thresh_desert(self, img):
+        uh = 37; us = 98; uv = 255
+        lh = 13; ls = 35; lv = 179
+        lower_hsv = np.array([lh, ls, lv])
+        upper_hsv = np.array([uh, us, uv])
+
+        hsv_img = cv2.cvtColor(img, cv2.COLOR_BGR2HSV)
+        mask = cv2.inRange(hsv_img, lower_hsv, upper_hsv)
+
+        contours, _ = cv2.findContours(mask, cv2.RETR_TREE, cv2.CHAIN_APPROX_SIMPLE)
+        contours = sorted(contours, key=lambda contour: cv2.arcLength(contour, True), reverse=True)
+        contours = [cnt for cnt in contours if cv2.arcLength(cnt, True) > self.desert_min_arc_length and cv2.boundingRect(cnt)[3] > 150]
+
+        epsilon = 0.01 * cv2.arcLength(contours[0], True)
+        approx_cnts = [cv2.approxPolyDP(cnt, epsilon, True) for cnt in contours]
+
+        blank_img = np.zeros_like(img)
+
+        return cv2.fillPoly(blank_img, approx_cnts, (255, 255, 255))
+
 
     # placeholder for start function
     def start(self):
         # start the timer
         print('starting timer, entering road pid state')
-        self.state = 'road'
+        # self.state = 'road'
+        self.state = 'desert'
     
     # main loop for the driver
     def run(self):
@@ -314,9 +364,9 @@ class Driver():
                 if self.reached_crosswalk == False and self.check_red(self.img):
                     print('red detected, going to ped state')
                     self.state = 'ped'
-                elif self.reached_truck and self.check_magenta(self.img):
-                    print('magenta detected, going to desert state')
-                    self.state = 'desert'
+                # elif self.reached_truck and self.check_magenta(self.img):
+                #     print('magenta detected, going to desert state')
+                #     self.state = 'desert'
                 else:
                     error = self.kp * self.get_error(self.img)
                     # print(error)
@@ -360,46 +410,60 @@ class Driver():
                 if not self.reached_truck:
                     self.drive_robot(0, 0)
                     truck_area, truck_mid = self.check_truck(self.img, at_intersection=True)
-                    if self.cycle_count < self.truck_init_cycle + 5:
+                    if self.cycle_count < self.truck_init_cycle + 15:
                         print('too early to tell')
-                    elif truck_mid < self.img_width // 2 and truck_area > 600:
+                    elif truck_mid < self.img_width // 2 and truck_area > 700:
                         print('truck close but on left, going right')
-                        self.drive_robot(self.lin_speed, -1 * self.truck_turn)
+                        self.truck_turn_dir = 'right'
+                        # self.drive_robot(self.lin_speed, -1 * self.truck_turn)
                         self.reached_truck = True
-                        rospy.sleep(0.5)
+                        # rospy.sleep(0.5)
                     elif truck_area > 7000:
                         print('truck is close, waiting...')
                         self.drive_robot(0, 0)
                         self.truck_action = 'wait'
                     else:
                         print('going left')
-                        self.drive_robot(self.lin_speed, self.truck_turn)
+                        self.truck_turn_dir = 'left'
+                        # self.drive_robot(self.lin_speed + 0.2, self.truck_turn)
                         self.reached_truck = True
-                        rospy.sleep(0.5)
+                        # rospy.sleep(0.5)
                 
                 # driving, detects truck
-                elif self.reached_truck and self.check_truck(self.img):
-                    print('driving, found truck')
-                    # slow down and but keep doing pid
-                    error = self.kp * self.get_error(self.img)
-                    self.drive_robot(self.lin_speed - self.truck_buffer, self.rot_speed * error)
+                # elif self.reached_truck and self.check_truck(self.img):
+                #     print('driving, found truck')
+                #     # slow down and but keep doing pid
+                #     error = self.kp * self.get_error(self.img)
+                #     self.drive_robot(self.lin_speed - self.truck_buffer, self.rot_speed * error)
                 
+
+
                 # driving, no truck
-                else:
-                    print('driving')
+                elif self.truck_turn_dir == 'right':
+                    # print('driving')
                     # regular road pid
+                    error = (self.kp + 1) * self.get_error(self.img)
+                    self.drive_robot(self.lin_speed + 0.2, self.rot_speed * error)
+                else:
                     error = self.kp * self.get_error(self.img)
                     self.drive_robot(self.lin_speed, self.rot_speed * error)
+
+                if self.check_magenta(self.img):
+                    print('magenta detected, going to desert state')
+                    self.state = 'desert'
 
 
             # ------------------ desert state --------------------
             elif self.state == 'desert':
-                if self.check_magenta(self.img):
-                    print('magenta detected, going to yoda state')
-                    self.state = 'yoda'
-                else:
-                    error = self.kp * self.get_error(self.img, road=False, desert=True)
-                    self.drive_robot(self.lin_speed, self.rot_speed * error)
+                # self.drive_robot(0, 0)
+                # if self.check_magenta(self.img):
+                #     print('magenta detected, going to yoda state')
+                #     self.state = 'yoda'
+                # else:
+                #     error = self.kp * self.get_error(self.img, road=False, desert=True)
+                #     self.drive_robot(self.lin_speed, self.rot_speed * error)
+                error = (self.kp) * self.get_error(self.img)
+                self.drive_robot(self.lin_speed - 0.2, self.rot_speed * error)
 
             # -------------------- yoda state --------------------
             elif self.state == 'yoda':
