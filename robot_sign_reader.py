@@ -7,6 +7,8 @@ from cv_bridge import CvBridge
 from sensor_msgs.msg import Image
 from geometry_msgs.msg import Twist
 
+import sign_cropper
+
 class SignReader():
     def __init__(self):
         rospy.init_node('sign_reader')
@@ -135,8 +137,9 @@ class SignReader():
     # when enough time has elapsed from initial sign detection, get the letters from the best 
     # sign image and send them to the neural network
     def read_sign(self):
-        # TODO: crop sign to letters and send to NN
-        print('sent sign image to NN')
+        category, clue = sign_cropper.signToLetters(self.img)
+        #TODO: send to nn
+
         return
     
     def find_road_centre(self, img, y):
