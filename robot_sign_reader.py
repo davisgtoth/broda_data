@@ -1,4 +1,4 @@
- #! /usr/bin/env python3
+#! /usr/bin/env python3
 
 import rospy
 import cv2
@@ -8,22 +8,22 @@ from sensor_msgs.msg import Image
 from geometry_msgs.msg import Twist
 
 import sign_cropper
+import robot_pid_er
 
 import tensorflow as tf
 from tensorflow import keras as ks
 from tensorflow.python.keras.backend import set_session
 from tensorflow.python.keras.models import load_model
-'''
-tf.compat.v1.estimator
-sess1 = tf.compat.v1.Session()   
-graph1 = tf.compat.v1.get_default_graph()
-set_session(sess1)
-tf.saved_model.LoadOptions(experimental_io_device = "/job:localhost")
-'''
+
+# sess1 = tf.compat.v1.Session()   
+# graph1 = tf.compat.v1.get_default_graph()
+# set_session(sess1)
+# tf.saved_model.LoadOptions(experimental_io_device = "/job:localhost")
+
 
 class SignReader():
     def __init__(self):
-        rospy.init_node('sign_reader')
+        #rospy.init_node('sign_reader')
 
         self.bridge = CvBridge()
         rospy.Subscriber("/R1/pi_camera/image_raw", Image, self.callback)
@@ -33,7 +33,7 @@ class SignReader():
         self.img = None
         self.min_sign_area = 6000
 
-        #self.nn = load_model('/home/fizzer/broda_data/my_model')
+        self.nn = load_model('broda_data/my_model04')
         
         self.num_pixels_above_bottom = 200
         self.kp = 5
@@ -42,6 +42,8 @@ class SignReader():
         self.no_lines_error = 1000
         
         self.sign_img = None
+
+        self.num_signs = 0
 
         self.firstSignTime = None
         self.durationBetweenSigns = rospy.Duration.from_sec(5)
@@ -58,31 +60,30 @@ class SignReader():
             img (numpy.ndarray): The image in which to check for a sign.
 
         Returns:
-            numpy.ndarray or None: The cropped image of the sign if found, None otherwise.
+            numpy.ndarray or None: The cropped image of the sign scaled and true size if found, None otherwise.
         """
+        height, width = img.shape[:2]
 
         # threshold camera image for blue
-        uh_blue = 150; us_blue = 255; uv_blue = 255
-        lh_blue = 5; ls_blue = 19; lv_blue = 0
-        lower_hsv = np.array([lh_blue,ls_blue,lv_blue])
-        upper_hsv = np.array([uh_blue,us_blue,uv_blue])
+        lower_hsv = (5,20,0)
+        upper_hsv = (150,255,255)
         hsv_img = cv2.cvtColor(img, cv2.COLOR_BGR2HSV)
         blue_mask = cv2.inRange(hsv_img, lower_hsv, upper_hsv)
 
         # threshold camera image for white
         gray_img = cv2.cvtColor(img, cv2.COLOR_BGR2GRAY)
-        white_mask1 = cv2.inRange(gray_img, 98, 105)
-        white_mask2 = cv2.inRange(gray_img, 197, 205)
-        white_mask3 = cv2.inRange(gray_img, 119, 125)
-        white_mask = cv2.bitwise_or(white_mask1, white_mask2)
-        white_mask = cv2.bitwise_or(white_mask, white_mask3)
+        sign_mask1 = cv2.inRange(gray_img, 95, 105)
+        sign_mask2 = cv2.inRange(gray_img, 195, 205)
+        sign_mask3 = cv2.inRange(gray_img, 115, 125)
+        sign_mask = cv2.bitwise_or(sign_mask1, sign_mask2)
+        sign_mask = cv2.bitwise_or(sign_mask, sign_mask3)
 
         # combine masks
         blue_mask_not = cv2.bitwise_not(blue_mask)
-        combined_mask = cv2.bitwise_and(blue_mask_not, white_mask)
+        combined_mask = cv2.bitwise_and(blue_mask_not, sign_mask)
 
         # find largest contour in the combined mask image
-        contours, _ = cv2.findContours(combined_mask, cv2.RETR_TREE, cv2.CHAIN_APPROX_SIMPLE)
+        contours, hierarchy = cv2.findContours(combined_mask, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
         if contours.__len__() == 0: # return None if no contours are found
             # print('no sign detected - no contours')
             return None
@@ -96,17 +97,25 @@ class SignReader():
 
         # find the corners of the sign
         x, y, w, h = cv2.boundingRect(largest_contour)
-        overlapping_points = [(point[0][0], point[0][1]) for point in largest_contour if point[0][0] <= x+10 or point[0][0] >= x+w-11]
-        corner1 = min((point for point in overlapping_points if point[0] <= x+10), key=lambda p: p[1], default=())
-        corner2 = min((point for point in overlapping_points if point[0] >= x+w-11), key=lambda p: p[1], default=())
-        corner3 = max((point for point in overlapping_points if point[0] <= x+10), key=lambda p: p[1], default=())
-        corner4 = max((point for point in overlapping_points if point[0] >= x+w-11), key=lambda p: p[1], default=())
+        epsilon = 0.03 * cv2.arcLength(largest_contour, True)
+        approx_polygon = cv2.approxPolyDP(largest_contour, epsilon, True)
+
+        corners = [point[0] for point in approx_polygon]
+        midpoint = int(len(corners)/2)
+        sorted_corner_points = sorted(corners, key=lambda point: point[0])
+        left = sorted(sorted_corner_points[:midpoint], key=lambda point: point[1])
+        right = sorted(sorted_corner_points[midpoint:], key=lambda point: point[1], reverse=True)
+
+        upperLeft = max((pt for pt in left), key=lambda p: p[1])
+        lowerLeft = min((pt for pt in left), key=lambda p: p[1])
+        upperRight = max((pt for pt in right), key=lambda p: p[1])
+        lowerRight = min((pt for pt in right), key=lambda p: p[1])
 
         # perspective transform and crop the image
-        src_pts = np.array([corner1, corner2, corner3, corner4], dtype='float32')
-        dst_pts = np.array([[0, 0], [w, 0], [0, h], [w, h]], dtype='float32')
-        matrix = cv2.getPerspectiveTransform(src_pts, dst_pts)
-        cropped_img = cv2.warpPerspective(img, matrix, (w, h))
+        src_pts = np.array([lowerLeft, upperLeft, lowerRight, upperRight], dtype=np.float32)
+        dst_pts = np.array([[0, 0], [0, height], [width, 0], [width, height]], dtype=np.float32)
+        M = cv2.getPerspectiveTransform(src_pts, dst_pts)
+        cropped_img = cv2.warpPerspective(img, M, (width, height))
 
         # threshold for red in the cropped image
         uh_red = 130; us_red = 255; uv_red = 255
@@ -115,6 +124,7 @@ class SignReader():
         upper_hsv_red = np.array([uh_red, us_red, uv_red])
         hsv_cropped_img = cv2.cvtColor(cropped_img, cv2.COLOR_RGB2HSV)
         red_mask_cropped = cv2.inRange(hsv_cropped_img, lower_hsv_red, upper_hsv_red)
+        
 
         # filter out if no red in the cropped image
         if not np.any(red_mask_cropped):
@@ -142,26 +152,37 @@ class SignReader():
             self.sign_img = new_sign
             self.firstSignTime = rospy.Time.now() # start timer for reading sign
             print('assigned sign image and timer started')
+            print(self.sign_img.size)
         else:
             if new_sign.size > self.sign_img.size: # compare size of new sign to stored sign
                 self.sign_img = new_sign
                 print('bigger sign found')
         return
+    
+    def num_to_alphanum(self, x):
+        if x <= 25:
+            return chr(x + 65)
+        else:
+            return chr(x + 22)
 
     # when enough time has elapsed from initial sign detection, get the letters from the best 
     # sign image and send them to the neural network
     def read_sign(self):
+        self.num_signs += 1
         category, clue = sign_cropper.signToLetters(self.sign_img)
-        for l in clue:
-            cv2.imshow('letter', l)
-            cv2.waitKey(1)
-        '''
-        with graph1.as_default():
-            set_session(sess1)
-            prediction = self.plate_NN.predict(clue)[0]
-'''
-
-        return #prediction
+        preds = []
+        for i in range(clue.shape[0]):
+            img_aug = np.expand_dims(clue[i], axis=0)
+            letter = tf.expand_dims(img_aug, axis=-1)
+            yp = self.nn.predict(letter)[0]
+            predict_ind = np.argmax(yp)
+            pred = self.num_to_alphanum(int(predict_ind))
+            print(pred)
+            preds.append(pred)
+            
+        prediction = ''.join(preds)
+        print(str(prediction))
+        return prediction
     
     def find_road_centre(self, img, y):
         """
@@ -227,10 +248,9 @@ class SignReader():
         while not rospy.is_shutdown():
             # check if robot camera feed sees a sign
             if self.img is not None:
-                cropped_img = self.check_if_sign(self.img) # returns None if no sign detected
+                cropped_img, cropped_img_true = self.check_if_sign(self.img) # returns None if no sign detected
                 if cropped_img is not None:
                     self.compare_sign(cropped_img) # changes self.sign_img if new sign is larger
-
                 error = self.kp * self.get_error(self.img)
                 move = Twist()
                 if error != self.kp * self.no_lines_error:
