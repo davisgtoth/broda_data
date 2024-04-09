@@ -63,7 +63,6 @@ def cropToWord(img):
 
     @return     croppedWords: top and bottom words of sign
     """
-  
   Hstart, Wstart = img.shape[:2]
   words = []
   buff = int(0.01*Wstart)
@@ -77,6 +76,7 @@ def cropToWord(img):
     hsv_img = cv2.cvtColor(word, cv2.COLOR_BGR2HSV)
     mask = cv2.inRange(hsv_img, lower_hsv, upper_hsv)
     contours, _ = cv2.findContours(mask, cv2.RETR_TREE, cv2.CHAIN_APPROX_SIMPLE)
+    
     startX = w_
     startY = h_
     endX = 0
@@ -138,7 +138,6 @@ def wordToLetters(word):
   possibleLetters = sorted(possibleLetters, key=lambda a: a[2])
   for l in possibleLetters:
     h0, w0 = l[0].shape[:2]
-    boxArea = h0*w0
     if wAvg == 0:
       wAvg = wSafe
     newW = round(w0/wAvg)
@@ -164,4 +163,4 @@ def signToLetters(sign):
   words = cropToWord(sign)
   category = wordToLetters(words[0])
   clue = wordToLetters(words[1])
-  return category, clue
+  return np.array(category), np.array(clue)
