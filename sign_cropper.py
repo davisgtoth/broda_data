@@ -72,12 +72,11 @@ def cropToWord(img):
   croppedWords = []
   for word in words:
     h_, w_ = word.shape[:2]
-    lower_hsv = (140,100,0)
-    upper_hsv = (180,255,255)
+    lower_hsv = (5,20,0)
+    upper_hsv = (150,255,255)
     hsv_img = cv2.cvtColor(word, cv2.COLOR_BGR2HSV)
     mask = cv2.inRange(hsv_img, lower_hsv, upper_hsv)
     contours, _ = cv2.findContours(mask, cv2.RETR_TREE, cv2.CHAIN_APPROX_SIMPLE)
-
     startX = w_
     startY = h_
     endX = 0
@@ -163,6 +162,6 @@ def signToLetters(sign):
                 clue: cropped and scaled images of letters in clue
     """
   words = cropToWord(sign)
-  category = wordToLetters(words(0))
-  clue = wordToLetters(words(1))
+  category = wordToLetters(words[0])
+  clue = wordToLetters(words[1])
   return category, clue

@@ -9,6 +9,18 @@ from geometry_msgs.msg import Twist
 
 import sign_cropper
 
+import tensorflow as tf
+from tensorflow import keras as ks
+from tensorflow.python.keras.backend import set_session
+from tensorflow.python.keras.models import load_model
+'''
+tf.compat.v1.estimator
+sess1 = tf.compat.v1.Session()   
+graph1 = tf.compat.v1.get_default_graph()
+set_session(sess1)
+tf.saved_model.LoadOptions(experimental_io_device = "/job:localhost")
+'''
+
 class SignReader():
     def __init__(self):
         rospy.init_node('sign_reader')
@@ -20,6 +32,8 @@ class SignReader():
 
         self.img = None
         self.min_sign_area = 6000
+
+        #self.nn = load_model('/home/fizzer/broda_data/my_model')
         
         self.num_pixels_above_bottom = 200
         self.kp = 5
@@ -137,10 +151,17 @@ class SignReader():
     # when enough time has elapsed from initial sign detection, get the letters from the best 
     # sign image and send them to the neural network
     def read_sign(self):
-        category, clue = sign_cropper.signToLetters(self.img)
-        #TODO: send to nn
+        category, clue = sign_cropper.signToLetters(self.sign_img)
+        for l in clue:
+            cv2.imshow('letter', l)
+            cv2.waitKey(1)
+        '''
+        with graph1.as_default():
+            set_session(sess1)
+            prediction = self.plate_NN.predict(clue)[0]
+'''
 
-        return
+        return #prediction
     
     def find_road_centre(self, img, y):
         """
@@ -224,8 +245,8 @@ class SignReader():
             # if we've found a sign ...
             if self.sign_img is not None:
                 # display the sign image
-                cv2.imshow('sign', self.sign_img)
-                cv2.waitKey(1)
+                #cv2.imshow('sign', self.sign_img)
+                #cv2.waitKey(1)
                 # check if enough time has elapsed to read the sign
                 current_time = rospy.Time.now()
                 elapsed_time = current_time - self.firstSignTime
