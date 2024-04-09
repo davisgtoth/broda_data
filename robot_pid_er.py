@@ -72,7 +72,7 @@ class Driver():
         self.truck_init_cycle = 0
         self.truck_cycle_buffer = 15
 
-        self.truck_left_area = 560
+        self.truck_left_area = 580 # goes right if truck area is bigger than this
         self.truck_wait_area = 7000
         
         self.truck_min_area = 5000 # used in function, but never actually called, check later
@@ -100,11 +100,23 @@ class Driver():
 
         # Yoda detection variables
         self.reached_yoda = False
+        
         self.cactus_min_area = 630
         self.cactus_max_area = 800
+        self.cactus_lin_speed = 0.6
+        
+        self.tunnel_turn_speed = 4.0
         self.tunnel_min_area = 30
         self.tunnel_mid_x = 500
+        
         self.over_hill = False
+        self.hill_lin_speed = 0.6
+        self.hill_rot_speed = -0.2
+
+        self.yoda_mag_min_area_for_y = 5000 # get the y value of the magenta line only when the contour area is greater than this
+        self.yoda_find_mag_min_area = 100 # minimum contour area of the magenta line to say that it detects the line
+        self.yoda_mag_x_mid = 500 # x coord of the magenta line to pid to
+        self.yoda_mag_y_exit = 650 # starts going to tunnel state when y value of mageneta line is greater than this
 
     # callback function for camera subscriber
     def callback(self, msg):
@@ -385,9 +397,9 @@ class Driver():
             if ret_midx:
                 return x + w // 2
             elif ret_y:
-                return y + h if cv2.contourArea(largest_contour) > 5000 else 0
+                return y + h if cv2.contourArea(largest_contour) > self.yoda_mag_min_area_for_y else 0
             else: 
-                return True if cv2.contourArea(largest_contour) > 100 else False
+                return True if cv2.contourArea(largest_contour) > self.yoda_find_mag_min_area else False
             
 
     def thresh_desert(self, img):
@@ -578,10 +590,10 @@ class Driver():
                 if not self.reached_yoda:
                     print('getting close to cactus')
                     while not self.check_cactus(self.img):
-                        self.drive_robot(0.6, 0)
+                        self.drive_robot(self.cactus_lin_speed, 0)
                     print('turning to see tunnel')
                     while self.find_tunnel(self.img) < self.tunnel_mid_x:
-                        self.drive_robot(0, 4.0)
+                        self.drive_robot(0, self.tunnel_turn_speed)
                     print('all good, ready to go over the hill')
                     self.drive_robot(0, 0)
                     self.reached_yoda = True
@@ -590,18 +602,29 @@ class Driver():
                         tunnel_mid = self.find_tunnel(self.img)
                         if tunnel_mid == -1:
                             while not self.check_magenta(self.img):
-                                self.drive_robot(0.6, -0.2)
+                                self.drive_robot(self.hill_lin_speed, self.hill_rot_speed)
                             print('over the hill now, checking for magenta')
                             self.over_hill = True
                         else:
                             error = self.kp * (self.tunnel_mid_x - tunnel_mid) / self.tunnel_mid_x
                             self.drive_robot(self.lin_speed, self.rot_speed * error)
                     else:
-                        while self.check_magenta(self.img, ret_y=True) < 650:
+                        while self.check_magenta(self.img, ret_y=True) < self.yoda_mag_y_exit:
                             mag_x = self.check_magenta(self.img, ret_midx=True)
-                            error = self.kp * (500 - mag_x) / 500
+                            error = self.kp * (self.yoda_mag_x_mid - mag_x) / self.yoda_mag_x_mid
                             self.drive_robot(self.lin_speed, self.rot_speed * error)
-                        print('close to magenta, going to tunnel state')
+                        print('close to magenta, angling to be straight')
+                        # TEST BELOW THIS
+                        while self.magneta_min_angle < self.check_magenta(self.img, ret_angle=True) < self.magneta_max_angle:
+                            angle = self.check_magenta(self.img, ret_angle=True)
+                            if angle < 45:
+                                self.drive_robot(self.magenta_angle_lin_speed, -1 * angle * self.magenta_angle_rot_speed)
+                            else:
+                                self.drive_robot(self.magenta_angle_lin_speed, (90 - angle) * self.magenta_angle_rot_speed)
+                        print('done angling, moving closer')
+                        while self.check_magenta(self.img, ret_y=True) < self.img_height - 10:
+                            self.drive_robot(self.magenta_angle_lin_speed, 0)
+                        print('going to tunnel state')
                         self.state = 'tunnel'
 
             # ------------------ tunnel state ------------------
