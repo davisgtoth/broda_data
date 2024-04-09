@@ -93,6 +93,11 @@ def cropToWord(img):
       if h+y >= endY:
         endY = h+y
     cropped = word[startY:endY, startX:endX]
+    h, w = cropped.shape[:2]
+    ratio = w/h
+    newY = 90
+    newX = int(newY*ratio)
+    cropped = cv2.resize(cropped, (newX,newY),  interpolation= cv2.INTER_LINEAR)
     croppedWords.append(cropped)
   return croppedWords
 
@@ -116,29 +121,48 @@ def wordToLetters(word):
   possibleLetters = []
   letters = []
   wAvg = 0
+  hAvg = 0
   wSafe = h_*8/9
   nums = 0
   for c in contours:
     if cv2.contourArea(c) > threshArea:
       x, y, w, h = cv2.boundingRect(c)
       letter = word[y:y+h, x:x+w]
-      if abs(w - wSafe) < 30 and abs(h - h_) < 0.12*h_:
+      if abs(w - wSafe) < 30 and abs(h - h_) < 20:
         nums += 1
         wAvg += w
-      if abs(h - h_) < 0.12*h_:
+      if abs(h - h_) < 19:
         possibleLetters.append((letter, w, x))
 
   if nums != 0:
-    wAvg = 1.3*wAvg/(nums)
+    wAvg = 1.2*wAvg/(nums)
   possibleLetters = sorted(possibleLetters, key=lambda a: a[2])
   for l in possibleLetters:
     h0, w0 = l[0].shape[:2]
+    boxArea = h0*w0
     if wAvg == 0:
       wAvg = wSafe
     newW = round(w0/wAvg)
     for i in range(newW):
       letter = l[0][0:h0, i*int(wAvg):(i+1)*int(wAvg)]
       letter = cv2.resize(letter, (60, 90),  interpolation= cv2.INTER_LINEAR)
+      gray = cv2.cvtColor(letter, cv2.COLOR_BGR2GRAY)
+      _, thresh1 = cv2.threshold(gray, 0, 255, cv2.THRESH_OTSU | cv2.THRESH_BINARY_INV)
+      letter = cv2.dilate(thresh1, rect_kernel, iterations = 1)
       letters.append(letter)
 
   return letters
+
+def signToLetters(sign):
+  """!
+    @brief      Crops sign into each character in the words present on the sign
+
+    @param      sign: image of sign to cropped
+
+    @return     category: cropped and scaled images of letters in category
+                clue: cropped and scaled images of letters in clue
+    """
+  words = cropToWord(sign)
+  category = wordToLetters(words(0))
+  clue = wordToLetters(words(1))
+  return category, clue
