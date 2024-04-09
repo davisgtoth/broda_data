@@ -42,6 +42,9 @@ for image in imgs:
     cv2.drawContours(image, [combined_contour], -1, (0, 255, 0), 3)
     x, y, w, h = cv2.boundingRect(combined_contour)
     cv2.rectangle(image, (x, y), (x + w, y + h), (255, 0, 0), 2)
+    x_mid = x + w // 2
+    print(f'x_mid: {x_mid}')
+    cv2.line(image, (x_mid, 0), (x_mid, image.shape[0]), (0, 0, 255), 2)
     cv2.imshow('mask', mask)
     cv2.imshow('original image', image)
     cv2.waitKey(0)

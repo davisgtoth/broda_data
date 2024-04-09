@@ -100,6 +100,7 @@ class Driver():
 
         # Yoda detection variables
         self.reached_yoda = False
+        self.tunnel_min_area = 100
 
     # callback function for camera subscriber
     def callback(self, msg):
@@ -398,6 +399,23 @@ class Driver():
 
         return cv2.fillPoly(blank_img, approx_cnts, (255, 255, 255))
 
+    # returns true if it detects the tunnel contour to be big enough
+    def check_tunnel(self, img):
+        uh = 9; us = 255; uv = 255
+        lh = 0; ls = 106; lv = 66
+        lower_hsv= np.array([lh, ls, lv])
+        upper_hsv= np.array([uh, us, uv])
+
+        hsv_img = cv2.cvtColor(img, cv2.COLOR_BGR2HSV)
+        mask = cv2.inRange(hsv_img, lower_hsv, upper_hsv)
+
+        contours, _ = cv2.findContours(mask, cv2.RETR_TREE, cv2.CHAIN_APPROX_SIMPLE)
+        contours = [cnt for cnt in contours if cv2.contourArea(cnt) > self.tunnel_min_area]
+        if len(contours) == 0:
+            return False
+        combined_contour = np.concatenate(contours)
+
+        return False
 
     # placeholder for start function
     def start(self):
@@ -516,18 +534,23 @@ class Driver():
 
             # -------------------- yoda state --------------------
             elif self.state == 'yoda':
-                # self.drive_robot(0.1, 0.5)
-                self.drive_robot(0, 0)
+                # self.drive_robot(0, 0)
+                if not self.reached_yoda:
+                    # first time reaching yoda, turn until see tunnel
+                    while not self.check_tunnel(self.img):
+                        self.drive_robot(0.5, 1.6)
+                    
+                    # self.drive_robot(0.5, 1.6)
+                    # rospy.sleep(1)
+                    # self.reached_yoda = True
+                    # self.drive_robot(1.5, 0)
+                    # rospy.sleep(2)
                 
-                # if not self.reached_yoda:
-                #     self.drive_robot(0.5, 1.6)
-                #     rospy.sleep(1)
-                #     self.reached_yoda = True
-                #     self.drive_robot(1.5, 0)
-                #     rospy.sleep(2)
-                # else: 
-                #     print('stopping')
-                #     self.drive_robot(0, 0)
+                else: 
+                    # done 
+                    pass
+                    # print('stopping')
+                    # self.drive_robot(0, 0)
 
                 # if self.check_magenta(self.img):
                 #     print('magenta detected, going back to desert state')
@@ -537,7 +560,6 @@ class Driver():
 
             # ------------------ tunnel state ------------------
             elif self.state == 'tunnel':
-                # new thresholding different thresholidng i think?
                 pass
 
             # ----------------- mountain state -----------------
