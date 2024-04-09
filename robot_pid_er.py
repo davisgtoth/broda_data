@@ -118,6 +118,9 @@ class Driver():
         self.yoda_mag_x_mid = 500 # x coord of the magenta line to pid to
         self.yoda_mag_y_exit = 650 # starts going to tunnel state when y value of mageneta line is greater than this
 
+        # Tunnel detection variables
+        self.tunnel_pid_height = 150
+
     # callback function for camera subscriber
     def callback(self, msg):
         self.img = self.bridge.imgmsg_to_cv2(msg, 'bgr8')
@@ -197,6 +200,9 @@ class Driver():
             self.road_buffer = self.desert_road_buffer
             # cv2.imshow('desert mask', cv2.resize(mask, (self.img_width // 2, self.img_height // 2)))
             # cv2.waitKey(1)
+        elif self.state == 'tunnel':
+            mask = self.find_tunnel(img, ret_mask=True)
+            self.road_buffer = self.tunnel_pid_height
 
         road_centre = self.find_road_centre(mask, self.road_buffer, self.img_width, self.img_height)
         if road_centre != -1:
@@ -349,8 +355,10 @@ class Driver():
         
         # TODO: check if this is used, don't think it is
         elif cv2.contourArea(largest_contour) > self.truck_min_area:
+            print('testing code not used for truck, here')
             return True
         else:
+            print('also testing code not used for truck, here')
             return False
     
     # returns true if there is magenta at or below the point where we detect for road lines
@@ -375,11 +383,13 @@ class Driver():
                 return 0
         largest_contour = max(contours, key=cv2.contourArea)
         x, y, w, h = cv2.boundingRect(largest_contour)
+        
         if self.state == 'truck':
             if y >= self.img_height - self.road_buffer:
                 return True
             else: 
                 return False
+        
         elif self.state == 'desert':
             rect = cv2.minAreaRect(largest_contour)
             if ret_angle:
@@ -393,6 +403,7 @@ class Driver():
                 return True
             else:
                 return False
+        
         elif self.state == 'yoda':
             if ret_midx:
                 return x + w // 2
@@ -401,7 +412,6 @@ class Driver():
             else: 
                 return True if cv2.contourArea(largest_contour) > self.yoda_find_mag_min_area else False
             
-
     def thresh_desert(self, img):
         uh = 37; us = 98; uv = 255
         lh = 13; ls = 35; lv = 179
@@ -452,8 +462,9 @@ class Driver():
         else:
             return False
     
-    # returns the centre point of the bounding rectangle of the tunnel, img width if no tunnel found
-    def find_tunnel(self, img):
+    # returns the centre point of the bounding rectangle of the tunnel, img width if no tunnel found by default
+    # can also return the contour area and the mask image
+    def find_tunnel(self, img, ret_area=False, ret_mask=False):
         uh = 9; us = 255; uv = 255
         lh = 0; ls = 106; lv = 66
         lower_hsv= np.array([lh, ls, lv])
@@ -462,13 +473,16 @@ class Driver():
         hsv_img = cv2.cvtColor(img, cv2.COLOR_BGR2HSV)
         mask = cv2.inRange(hsv_img, lower_hsv, upper_hsv)
 
+        if ret_mask:
+            return mask
+
         contours, _ = cv2.findContours(mask, cv2.RETR_TREE, cv2.CHAIN_APPROX_SIMPLE)
         contours = [cnt for cnt in contours if cv2.contourArea(cnt) > self.tunnel_min_area]
         if len(contours) == 0:
-            return -1
+            return -1 if not ret_area else 0
         combined_contour = np.concatenate(contours)
         x, y, w, h = cv2.boundingRect(combined_contour)
-        return x + w // 2
+        return x + w // 2 if not ret_area else cv2.contourArea(combined_contour)
 
     # placeholder for start function
     def start(self):
@@ -614,7 +628,7 @@ class Driver():
                             error = self.kp * (self.yoda_mag_x_mid - mag_x) / self.yoda_mag_x_mid
                             self.drive_robot(self.lin_speed, self.rot_speed * error)
                         print('close to magenta, angling to be straight')
-                        # TEST BELOW THIS
+                        # TODO: TEST BELOW THIS
                         while self.magneta_min_angle < self.check_magenta(self.img, ret_angle=True) < self.magneta_max_angle:
                             angle = self.check_magenta(self.img, ret_angle=True)
                             if angle < 45:
@@ -629,11 +643,19 @@ class Driver():
 
             # ------------------ tunnel state ------------------
             elif self.state == 'tunnel':
-                self.drive_robot(0, 0)
+                # TODO: TEST THIS
+                # self.drive_robot(0, 0)
+                if self.find_tunnel(self.img, ret_area=True) < 1000:
+                    # pid with tunnel
+                    error = self.kp * self.get_error(self.img)
+                    self.drive_robot(self.lin_speed, self.rot_speed * error)
+                else:
+                    print('tunnel contour too small, going to mountain state')
+                    self.state = 'mountain'
 
             # ----------------- mountain state -----------------
             elif self.state == 'mountain':
-                pass
+                self.drive_robot(0, 0)
         
         # rospy.sleep(0.1)
 
@@ -644,4 +666,3 @@ if __name__ == '__main__':
         my_driver.run()
     except rospy.ROSInterruptException:
         pass
-                
