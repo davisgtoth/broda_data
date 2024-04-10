@@ -33,7 +33,9 @@ class SignReader():
         self.img = None
         self.min_sign_area = 6000
 
-        self.nn = load_model('broda_data/my_model04')
+        self.path = '/home/fizzer/broda_data/my_model05'
+        self.nn = load_model(self.path)
+        self.letter_check_num = 10
         
         self.num_pixels_above_bottom = 200
         self.kp = 5
@@ -169,20 +171,43 @@ class SignReader():
     # sign image and send them to the neural network
     def read_sign(self):
         self.num_signs += 1
+        #cv2.imshow("sign "+str(self.num_signs), self.sign_img)
+        #cv2.waitKey(1)
         category, clue = sign_cropper.signToLetters(self.sign_img)
         preds = []
         for i in range(clue.shape[0]):
-            img_aug = np.expand_dims(clue[i], axis=0)
-            letter = tf.expand_dims(img_aug, axis=-1)
-            yp = self.nn.predict(letter)[0]
-            predict_ind = np.argmax(yp)
-            pred = self.num_to_alphanum(int(predict_ind))
-            print(pred)
-            preds.append(pred)
+            img = clue[i]
+            h, w = img.shape[:2]
+            img1 = self.edit_letter(img, h, 0, w)
+            img2 = self.edit_letter(img, h, 0, int(w*4/5))
+            img3 = self.edit_letter(img, h, int(w*1/5), w)
+            img4 = self.edit_letter(img, h, int(w*1/5), int(w*4/5))
+            possibly = []
+            possibly.append(self.predict_letter(img1))
+            possibly.append(self.predict_letter(img2))
+            possibly.append(self.predict_letter(img3))
+            possibly.append(self.predict_letter(img4))
+            predict = max(set(possibly), key=possibly.count)
+            for p in possibly:
+                print(p)
+            preds.append(predict)
             
         prediction = ''.join(preds)
         print(str(prediction))
         return prediction
+    
+    def edit_letter(self, img, h, wstart, wend):
+        img = img[0:h, wstart:wend]
+        img = cv2.resize(img, (60,90), interpolation= cv2.INTER_LINEAR)
+        img_aug = np.expand_dims(img, axis=0)
+        letter = tf.expand_dims(img_aug, axis=-1)
+        return letter
+    
+    def predict_letter(self, img):
+        yp = self.nn.predict(img)[0]
+        predict_ind = np.argmax(yp)
+        pred = self.num_to_alphanum(int(predict_ind))
+        return pred
     
     def find_road_centre(self, img, y):
         """

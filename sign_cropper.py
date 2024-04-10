@@ -108,7 +108,8 @@ def wordToLetters(word):
 
     @return     letters: cropped and scaled images of letters
     """
-  
+  cv2.imshow("word", word)
+  cv2.waitKey(1)
   letters = []
   h_, w_ = word.shape[:2]
   gray = cv2.cvtColor(word, cv2.COLOR_BGR2GRAY)
@@ -127,19 +128,20 @@ def wordToLetters(word):
     if cv2.contourArea(c) > threshArea:
       x, y, w, h = cv2.boundingRect(c)
       letter = word[y:y+h, x:x+w]
-      if abs(w - wSafe) < 30 and abs(h - h_) < 20:
+      if abs(w - wSafe) < 30 and abs(h - h_) < 25:
         nums += 1
         wAvg += w
-      if abs(h - h_) < 19:
+      if abs(h - h_) < 25:
         possibleLetters.append((letter, w, x))
 
   if nums != 0:
     wAvg = 1.2*wAvg/(nums)
   possibleLetters = sorted(possibleLetters, key=lambda a: a[2])
+  if wAvg == 0:
+    wAvg = wSafe
+  
   for l in possibleLetters:
     h0, w0 = l[0].shape[:2]
-    if wAvg == 0:
-      wAvg = wSafe
     newW = round(w0/wAvg)
     for i in range(newW):
       letter = l[0][0:h0, i*int(wAvg):(i+1)*int(wAvg)]
@@ -148,6 +150,13 @@ def wordToLetters(word):
       _, thresh1 = cv2.threshold(gray, 0, 255, cv2.THRESH_OTSU | cv2.THRESH_BINARY_INV)
       letter = cv2.dilate(thresh1, rect_kernel, iterations = 1)
       letters.append(letter)
+  '''for i in range(newW):
+    letter = word[0:h_, i*int(wAvg):(i+1)*int(wAvg)]
+    letter = cv2.resize(letter, (60, 90),  interpolation= cv2.INTER_LINEAR)
+    gray = cv2.cvtColor(letter, cv2.COLOR_BGR2GRAY)
+    _, thresh1 = cv2.threshold(gray, 0, 255, cv2.THRESH_OTSU | cv2.THRESH_BINARY_INV)
+    letter = cv2.dilate(thresh1, rect_kernel, iterations = 1)
+    letters.append(letter)'''
 
   return letters
 
@@ -163,4 +172,6 @@ def signToLetters(sign):
   words = cropToWord(sign)
   category = wordToLetters(words[0])
   clue = wordToLetters(words[1])
+  cv2.imshow("clue", np.concatenate(clue, axis=0))
+  cv2.waitKey(1)
   return np.array(category), np.array(clue)
