@@ -252,12 +252,15 @@ def check_magenta(img):
 
 def thresh_desert(img):
         uh = 37; us = 98; uv = 255
-        lh = 13; ls = 35; lv = 179
+        lh = 13; ls = 35; lv = 152 #lv = 179
         lower_hsv = np.array([lh, ls, lv])
         upper_hsv = np.array([uh, us, uv])
 
         hsv_img = cv2.cvtColor(img, cv2.COLOR_BGR2HSV)
         mask = cv2.inRange(hsv_img, lower_hsv, upper_hsv)
+        cv2.imshow('mask', mask)
+        cv2.imshow('original image', img)
+        cv2.waitKey(0)
 
         contours, _ = cv2.findContours(mask, cv2.RETR_TREE, cv2.CHAIN_APPROX_SIMPLE)
         # contours = sorted(contours, key=lambda contour: cv2.arcLength(contour, True), reverse=True)
@@ -272,7 +275,7 @@ def thresh_desert(img):
 
         blank_img = np.zeros_like(img)
 
-        return cv2.fillPoly(blank_img, approx_cnts, (255, 255, 255))
+        # return cv2.fillPoly(blank_img, approx_cnts, (255, 255, 255))
 
 # for image in imgs:
 #     lines = thresh_desert(image)
@@ -281,7 +284,7 @@ def thresh_desert(img):
 #     cv2.imshow('lines and original image', np.hstack((lines, image)))
 #     cv2.waitKey(0)
 
-imgs = [cv2.imread(f'magenta_images_2/img_{i}.jpg') for i in range(29)]
+imgs = [cv2.imread(f'img_{i}.jpg') for i in range(38)]
 
 for image in imgs:
-    check_magenta(image)
+    thresh_desert(image)

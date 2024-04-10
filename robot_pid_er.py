@@ -95,7 +95,7 @@ class Driver():
 
         self.magneta_min_angle = 0.5
         self.magneta_max_angle = 89.5
-        self.magenta_angle_lin_speed = 0.3
+        self.magenta_angle_lin_speed = 0.2
         self.magenta_angle_rot_speed = 0.2
 
         # Yoda detection variables
@@ -631,11 +631,11 @@ class Driver():
                             mag_x = self.check_magenta(self.img, ret_midx=True)
                             error = self.kp * (self.yoda_mag_x_mid - mag_x) / self.yoda_mag_x_mid
                             self.drive_robot(0.6, self.rot_speed * error)
-                            print('y: ', self.check_magenta(self.img, ret_y=True))
+                            # print('y: ', self.check_magenta(self.img, ret_y=True))
                         print('going straight now')
-                        while self.check_magenta(self.img, ret_y=True) < 550:
+                        while self.check_magenta(self.img, ret_y=True) < 560:
                             self.drive_robot(0.5, 0)
-                            print('y: ', self.check_magenta(self.img, ret_y=True))
+                            # print('y: ', self.check_magenta(self.img, ret_y=True))
                         print('close to magenta, angling to be straight')
                         while 0.5 < self.check_magenta(self.img, ret_angle=True) < 89.5:
                             angle = self.check_magenta(self.img, ret_angle=True)
