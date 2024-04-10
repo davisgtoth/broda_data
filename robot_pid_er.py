@@ -72,7 +72,7 @@ class Driver():
         self.truck_init_cycle = 0
         self.truck_cycle_buffer = 15
 
-        self.truck_left_area = 580 # goes right if truck area is bigger than this
+        self.truck_left_area = 600 # goes right if truck area is bigger than this
         self.truck_wait_area = 7000
         
         self.truck_min_area = 5000 # used in function, but never actually called, check later
@@ -116,7 +116,7 @@ class Driver():
         self.yoda_mag_min_area_for_y = 5000 # get the y value of the magenta line only when the contour area is greater than this
         self.yoda_find_mag_min_area = 100 # minimum contour area of the magenta line to say that it detects the line
         self.yoda_mag_x_mid = 550 # x coord of the magenta line to pid to
-        self.yoda_mag_y_exit = 715 # starts going to tunnel state when y value of mageneta line is greater than this
+        self.yoda_mag_y_exit = 700 # starts going to tunnel state when y value of mageneta line is greater than this
 
         # Tunnel detection variables
         self.tunnel_pid_height = 400
@@ -203,8 +203,10 @@ class Driver():
         elif self.state == 'tunnel':
             mask = self.find_tunnel(img, ret_mask=True)
             self.road_buffer = self.tunnel_pid_height
+            self.road_line_width = 450
 
         road_centre = self.find_road_centre(mask, self.road_buffer, self.img_width, self.img_height)
+
         if road_centre != -1:
             error = ((self.img_width // 2) - road_centre) / (self.img_width // 2)
         elif self.reached_crosswalk and not self.reached_truck:
@@ -408,7 +410,7 @@ class Driver():
             if ret_midx:
                 return x + w // 2
             elif ret_y:
-                return y + h if cv2.contourArea(largest_contour) > self.yoda_mag_min_area_for_y else 0
+                return y + h // 2 #if cv2.contourArea(largest_contour) > self.yoda_mag_min_area_for_y else 0
             elif ret_angle:
                 return rect[2]
             else: 
@@ -490,8 +492,8 @@ class Driver():
     def start(self):
         # start the timer
         print('starting timer, entering road pid state')
-        self.state = 'road'
-        # self.state = 'desert'
+        # self.state = 'road'
+        self.state = 'desert'
     
     # main loop for the driver
     def run(self):
@@ -625,31 +627,37 @@ class Driver():
                             error = self.kp * (self.tunnel_mid_x - tunnel_mid) / self.tunnel_mid_x
                             self.drive_robot(self.lin_speed, self.rot_speed * error)
                     else:
-                        while self.check_magenta(self.img, ret_y=True) < self.yoda_mag_y_exit:
+                        while self.check_magenta(self.img, ret_y=True) <  400: #self.yoda_mag_y_exit:
                             mag_x = self.check_magenta(self.img, ret_midx=True)
                             error = self.kp * (self.yoda_mag_x_mid - mag_x) / self.yoda_mag_x_mid
                             self.drive_robot(0.6, self.rot_speed * error)
+                            print('y: ', self.check_magenta(self.img, ret_y=True))
+                        print('going straight now')
+                        while self.check_magenta(self.img, ret_y=True) < 550:
+                            self.drive_robot(0.5, 0)
+                            print('y: ', self.check_magenta(self.img, ret_y=True))
                         print('close to magenta, angling to be straight')
-                        while 1 < self.check_magenta(self.img, ret_angle=True) < 80:
+                        while 0.5 < self.check_magenta(self.img, ret_angle=True) < 89.5:
                             angle = self.check_magenta(self.img, ret_angle=True)
-                            print('angle: ', angle)
+                            # print('angle: ', angle)
                             if angle < 45:
-                                self.drive_robot(0.2, -1 * angle * 0.1)
+                                self.drive_robot(0.1, -1 * angle * 0.1)
                             else:
-                                self.drive_robot(0.2, (90 - angle) * 0.1)
+                                self.drive_robot(0.1, (90 - angle) * 0.1)
                         self.drive_robot(0, 0)
                         print('going to tunnel state')
-                        self.drive_robot(self.lin_speed, 0)
-                        rospy.sleep(0.2)
+                        # self.drive_robot(self.lin_speed, -0.8)
+                        # rospy.sleep(0.2)
                         self.state = 'tunnel'
 
             # ------------------ tunnel state ------------------
             elif self.state == 'tunnel':
                 # TODO: TEST THIS
-                if self.find_tunnel(self.img, ret_area=True) > 8000:
+                if self.find_tunnel(self.img, ret_area=True) > 10000:
                     # pid with tunnel
-                    error = 11 * self.get_error(self.img)
-                    self.drive_robot(self.lin_speed, self.rot_speed * error)
+                    # error = 12 * self.get_error(self.img)
+                    # self.drive_robot(0.3, self.rot_speed * error)
+                    self.drive_robot(0.5, 0)
                 else:
                     print('tunnel contour too small, going to mountain state')
                     self.state = 'mountain'

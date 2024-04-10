@@ -133,9 +133,9 @@ upper_hsv_mag = np.array([uh_mag, us_mag, uv_mag])
 def find_road_centre(img, y, width, height, ret_sides=False):
         left_index = right_index = -1
         for i in range(width):
-            if img[height - y, i] == 255 and left_index == -1:
+            if img[y, i] == 255 and left_index == -1:
                 left_index = i
-            elif img[height - y, i] == 255 and left_index != -1:
+            elif img[y, i] == 255 and left_index != -1:
                 right_index = i
 
         if ret_sides:
@@ -143,7 +143,7 @@ def find_road_centre(img, y, width, height, ret_sides=False):
 
         road_centre = -1
         if left_index != -1 and right_index != -1:
-            if right_index - left_index > 150:
+            if right_index - left_index > 15:
                 road_centre = (left_index + right_index) // 2
             elif left_index < width // 2:
                 road_centre = (left_index + width) // 2
@@ -174,3 +174,28 @@ for image in imgs:
     cv2.imshow('mask', mask)
     cv2.imshow('original image', image)
     cv2.waitKey(0)
+
+uh_blue = 130; us_blue = 255; uv_blue = 255
+lh_blue = 110; ls_blue = 50; lv_blue = 50
+lower_hsv_blue = np.array([lh_blue, ls_blue, lv_blue])
+upper_hsv_blue = np.array([uh_blue, us_blue, uv_blue])
+
+for image in imgs:
+    hsv_img = cv2.cvtColor(image, cv2.COLOR_BGR2HSV)
+    mask = cv2.inRange(hsv_img, lower_hsv_blue, upper_hsv_blue)
+
+    contours, _ = cv2.findContours(mask, cv2.RETR_TREE, cv2.CHAIN_APPROX_SIMPLE)
+
+    # print('number of contours:', contours.__len__())
+    for cnt in contours:
+        # print('area:', cv2.contourArea(cnt))
+        if cv2.contourArea(cnt) < 1000 or cv2.contourArea(cnt) > 40000:
+            cv2.drawContours(mask, [cnt], -1, 0, -1)
+
+    road_centre = find_road_centre(mask, 280, image.shape[1], image.shape[0])
+    cv2.circle(image, (road_centre, 280), 5, (0, 0, 255), -1)
+    cv2.line(image, (image.shape[1] // 2, 0), (image.shape[1] // 2, image.shape[0]), (0, 0, 0), 2)
+
+    # cv2.imshow('mask', mask)
+    # cv2.imshow('original image', image)
+    # cv2.waitKey(0)
