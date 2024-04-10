@@ -11,7 +11,7 @@ class Picture_Taker():
 
         self.bridge = CvBridge()
         self.img = None
-        self.counter = 12
+        self.counter = 0
 
         rospy.Subscriber("/R1/pi_camera/image_raw", Image, self.callback)
 

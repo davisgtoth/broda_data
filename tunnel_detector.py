@@ -36,14 +36,12 @@ def find_cactus(image):
 #     img = cv2.imread(f'img_{i}.jpg')
 #     find_cactus(img)
 
-
-
 # for i in range(15):
 #     img = cv2.imread(f'tunnel_images_2/img_{i}.jpg')
 #     imgs.append(img)
 
 imgs = []
-for i in range(15):
+for i in range(7):
     img = cv2.imread(f'img_{i}.jpg')
     imgs.append(img)
 
@@ -72,62 +70,107 @@ lh_mag = 150; ls_mag = 90; lv_mag = 110
 lower_hsv_mag = np.array([lh_mag, ls_mag, lv_mag])
 upper_hsv_mag = np.array([uh_mag, us_mag, uv_mag])
 
+# for image in imgs:
+#     # gray_img = cv2.cvtColor(image, cv2.COLOR_BGR2GRAY)
+#     # skull = cv2.inRange(gray_img, 100, 120)
+#     # cv2.imshow('gray image', gray_img)
+#     image_copy = image.copy()
+#     hsv_img = cv2.cvtColor(image, cv2.COLOR_BGR2HSV)
+#     mask = cv2.inRange(hsv_img, lower_hsv, upper_hsv)
+
+#     contours, _ = cv2.findContours(mask, cv2.RETR_TREE, cv2.CHAIN_APPROX_SIMPLE)
+#     if contours.__len__() == 0:
+#         print('no tunnel detected - no contours')
+#         cv2.imshow('original image', image)
+#         cv2.waitKey(0)
+#         continue
+#     good_contours = [cnt for cnt in contours if cv2.contourArea(cnt) > 30]
+#     # print(cv2.contourArea(largest_contour))
+#     if good_contours.__len__() == 0:
+#         print('no tunnel detected - too small')
+#         cv2.imshow('original image', image)
+#         cv2.waitKey(0)
+#         continue
+#     combined_contour = np.concatenate(good_contours)
+#     cv2.drawContours(image, [combined_contour], -1, (0, 255, 0), 3)
+#     x, y, w, h = cv2.boundingRect(combined_contour)
+#     cv2.rectangle(image, (x, y), (x + w, y + h), (255, 0, 0), 2)
+#     x_mid = x + w // 2
+#     print(f'x_mid: {x_mid}')
+#     cv2.line(image, (x_mid, 0), (x_mid, image.shape[0]), (0, 0, 255), 2)
+#     cv2.line(image, (500, 0), (500, image.shape[0]), (0, 0, 0), 2)
+#     cv2.line(image, (300, 0), (300, image.shape[0]), (0, 0, 0), 2)
+#     cv2.imshow('mask', mask)
+#     cv2.imshow('original image', image)
+
+#     hsv_img = cv2.cvtColor(image_copy, cv2.COLOR_BGR2HSV)
+#     magenta_mask = cv2.inRange(hsv_img, lower_hsv_mag, upper_hsv_mag)
+
+#     mag_contours, _ = cv2.findContours(magenta_mask, cv2.RETR_TREE, cv2.CHAIN_APPROX_SIMPLE)
+#     if mag_contours.__len__() == 0:
+#         print('no magenta detected - no contours')
+#         cv2.imshow('magenta mask', magenta_mask)
+#         cv2.waitKey(0)
+#         continue
+#     largest_mag_contour = max(mag_contours, key=cv2.contourArea)
+#     x, y, w, h = cv2.boundingRect(largest_mag_contour)
+#     cv2.rectangle(image_copy, (x, y), (x + w, y + h), (255, 0, 0), 2)
+#     # rect = cv2.minAreaRect(largest_mag_contour)
+#     # box = cv2.boxPoints(rect)
+#     # box = np.int0(box)
+#     # cv2.drawContours(image_copy, [box], 0, (0, 0, 255), 2)
+#     cv2.line(image_copy, (x + w // 2, 0), (x + w // 2, image_copy.shape[0]), (0, 0, 255), 2)
+#     print(f'magenta x mid: {x + w // 2}')
+#     # cv2.line(image_copy, (int(rect[0][0]), 0), (int(rect[0][0]), image_copy.shape[0]), (0, 0, 255), 2)
+#     # print(f'magenta x mid: {rect[0][0]}')
+#     print(f'area: {cv2.contourArea(largest_mag_contour)}')
+#     print(f'y: {y}, h: {h}')
+#     cv2.imshow('magenta mask', magenta_mask)
+#     cv2.imshow('original image copy', image_copy)
+
+#     cv2.waitKey(0)
+
+def find_road_centre(img, y, width, height, ret_sides=False):
+        left_index = right_index = -1
+        for i in range(width):
+            if img[height - y, i] == 255 and left_index == -1:
+                left_index = i
+            elif img[height - y, i] == 255 and left_index != -1:
+                right_index = i
+
+        if ret_sides:
+            return left_index, right_index
+
+        road_centre = -1
+        if left_index != -1 and right_index != -1:
+            if right_index - left_index > 150:
+                road_centre = (left_index + right_index) // 2
+            elif left_index < width // 2:
+                road_centre = (left_index + width) // 2
+            else:
+                road_centre = right_index // 2
+        else:
+            road_centre = -1
+
+        return road_centre
+
 for image in imgs:
-    # gray_img = cv2.cvtColor(image, cv2.COLOR_BGR2GRAY)
-    # skull = cv2.inRange(gray_img, 100, 120)
-    # cv2.imshow('gray image', gray_img)
-    image_copy = image.copy()
     hsv_img = cv2.cvtColor(image, cv2.COLOR_BGR2HSV)
     mask = cv2.inRange(hsv_img, lower_hsv, upper_hsv)
+    road_centre = find_road_centre(mask, 400, image.shape[1], image.shape[0])
+    cv2.circle(image, (road_centre, image.shape[0] - 400), 5, (0, 0, 255), -1)
+    cv2.line(image, (image.shape[1] // 2, 0), (image.shape[1] // 2, image.shape[0]), (0, 0, 0), 2)
 
     contours, _ = cv2.findContours(mask, cv2.RETR_TREE, cv2.CHAIN_APPROX_SIMPLE)
-    if contours.__len__() == 0:
-        print('no tunnel detected - no contours')
-        cv2.imshow('original image', image)
-        cv2.waitKey(0)
-        continue
     good_contours = [cnt for cnt in contours if cv2.contourArea(cnt) > 30]
-    # print(cv2.contourArea(largest_contour))
     if good_contours.__len__() == 0:
         print('no tunnel detected - too small')
         cv2.imshow('original image', image)
         cv2.waitKey(0)
         continue
     combined_contour = np.concatenate(good_contours)
-    cv2.drawContours(image, [combined_contour], -1, (0, 255, 0), 3)
-    x, y, w, h = cv2.boundingRect(combined_contour)
-    cv2.rectangle(image, (x, y), (x + w, y + h), (255, 0, 0), 2)
-    x_mid = x + w // 2
-    print(f'x_mid: {x_mid}')
-    cv2.line(image, (x_mid, 0), (x_mid, image.shape[0]), (0, 0, 255), 2)
-    cv2.line(image, (500, 0), (500, image.shape[0]), (0, 0, 0), 2)
-    cv2.line(image, (300, 0), (300, image.shape[0]), (0, 0, 0), 2)
+    print('area:', cv2.contourArea(combined_contour))
+
     cv2.imshow('mask', mask)
     cv2.imshow('original image', image)
-
-    hsv_img = cv2.cvtColor(image_copy, cv2.COLOR_BGR2HSV)
-    magenta_mask = cv2.inRange(hsv_img, lower_hsv_mag, upper_hsv_mag)
-
-    mag_contours, _ = cv2.findContours(magenta_mask, cv2.RETR_TREE, cv2.CHAIN_APPROX_SIMPLE)
-    if mag_contours.__len__() == 0:
-        print('no magenta detected - no contours')
-        cv2.imshow('magenta mask', magenta_mask)
-        cv2.waitKey(0)
-        continue
-    largest_mag_contour = max(mag_contours, key=cv2.contourArea)
-    x, y, w, h = cv2.boundingRect(largest_mag_contour)
-    cv2.rectangle(image_copy, (x, y), (x + w, y + h), (255, 0, 0), 2)
-    # rect = cv2.minAreaRect(largest_mag_contour)
-    # box = cv2.boxPoints(rect)
-    # box = np.int0(box)
-    # cv2.drawContours(image_copy, [box], 0, (0, 0, 255), 2)
-    cv2.line(image_copy, (x + w // 2, 0), (x + w // 2, image_copy.shape[0]), (0, 0, 255), 2)
-    print(f'magenta x mid: {x + w // 2}')
-    # cv2.line(image_copy, (int(rect[0][0]), 0), (int(rect[0][0]), image_copy.shape[0]), (0, 0, 255), 2)
-    # print(f'magenta x mid: {rect[0][0]}')
-    print(f'area: {cv2.contourArea(largest_mag_contour)}')
-    print(f'y: {y}, h: {h}')
-    cv2.imshow('magenta mask', magenta_mask)
-    cv2.imshow('original image copy', image_copy)
-
     cv2.waitKey(0)
