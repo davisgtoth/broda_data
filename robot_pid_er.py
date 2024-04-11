@@ -34,6 +34,10 @@ class Driver():
         self.road_max_white_val = 255
         
         self.kp = 11 # proportional gain for PID controller
+        self.kd = 0.5
+        self.prev_error = 0
+        self.last_time = 0
+        self.dt = 0
         self.road_buffer = 200 # pixels above bottom of image to find road centre
         self.speed_buffer = 1.3 # buffer for gradual speed increase/decrease
 
@@ -82,7 +86,7 @@ class Driver():
         self.truck_right_kp = 11
         self.truck_right_lin_speed = 0.5 #0.7
 
-        self.truck_to_desert_sleep = 0.2 # time to go straight when transitioning from truck to desert states
+        self.truck_to_desert_sleep = 0.3 # time to go straight when transitioning from truck to desert states
 
         # Desert detection variables
         self.desert_min_arc_length = 750 
@@ -121,30 +125,22 @@ class Driver():
         # Tunnel detection variables
         self.tunnel_pid_height = 400
 
+        # Mountain detection variables
+        self.found_mountain_lines = False
+        self.boost = False
+        self.mountain_start_cycle = 0
+        self.boost_count = 0
+        self.boost_cycle = 0
+
     # callback function for camera subscriber
     def callback(self, msg):
         self.img = self.bridge.imgmsg_to_cv2(msg, 'bgr8')
         self.img_height, self.img_width = self.img.shape[:2]
         self.cycle_count += 1
+        self.dt = rospy.Time.now().to_sec() - self.last_time
+        self.last_time = rospy.Time.now().to_sec()
 
     def find_road_centre(self, img, y, width, height, ret_sides=False):
-        """
-        Returns the centre of the road at y pixels above the bottom of the image in a thresholded 
-        image where the road is outlined in white. If ret_sides is True, returns the left and 
-        right indices of the road.
-
-        Parameters:
-        img (numpy.ndarray): Thresholded image where the road is outlined in white (255).
-        y (int): The number of pixels above the bottom of the image to find the centre.
-        ret_sides (bool, optional): If set to True, the function returns the left and right 
-                                    indices of the road. Default is False.
-
-        Returns:
-        int or tuple: If ret_sides is True, the function returns a tuple (left_index, right_index) 
-                        representing the left and right indices of the road.
-                      If ret_sides is False, the function returns an integer representing the center
-                        of the road. If the road center cannot be determined, the function returns -1.
-        """
         left_index = right_index = -1
         for i in range(width):
             if img[height - y, i] == 255 and left_index == -1:
@@ -155,20 +151,38 @@ class Driver():
         if ret_sides:
             return left_index, right_index
 
+        # print(f'index difference: {right_index - left_index}')
+
         road_centre = -1
         if left_index != -1 and right_index != -1:
             if right_index - left_index > self.road_line_width:
                 road_centre = (left_index + right_index) // 2
-            elif left_index < width // 2:
+            elif left_index < width // 2: # and self.state != 'mountain':
                 road_centre = (left_index + width) // 2
-            else:
+            elif left_index >= width // 2: # and self.state != 'mountain':
                 road_centre = right_index // 2
+            # elif self.state == 'mountain':
+            #     if right_index - left_index < 200:
+            #         road_centre = -1
+            #     elif right_index > width // 2 and self.state == 'mountain':
+            #         road_centre = right_index // 2
+            #     else:
+            #         road_centre = (left_index + width) // 2
         else:
+            # print('no road at this y level')
             road_centre = -1
 
         # if road_centre != -1:
         #     cv2.imshow('camera feed', cv2.circle(img, (road_centre, height - y), 5, (0, 0, 255), -1))
         #     cv2.waitKey(1)
+
+        # for y, row in enumerate(img):
+        #     white_pixels = np.where(row == 255)[0]
+        #     if white_pixels.__len__() > 0:
+        #         if y > 600 and self.state == 'mountain':
+        #             road_centre = -1
+        #             print('road too low')
+        #         break
 
         return road_centre
     
@@ -177,21 +191,6 @@ class Driver():
     # returns error of 0 if no road lines are found on either side
     # enters the truck state if no road is detected and have reached the crosswalk
     def get_error(self, img):
-        """
-        Returns the error between the centre of the road and the centre of a thresholded image
-        for either a road or desert image, default is road. Returns error of 0 if no road lines 
-        are found on either side. Enters the truck state if no road is detected and have reached 
-        the crosswalk.
-
-        Parameters:
-        img (numpy.ndarray): The input image.
-        road (bool, optional): If True, the function processes the image as a road image. Default is True.
-        desert (bool, optional): If True, the function processes the image as a desert image. Default is False.
-
-        Returns:
-        float: The error between the centre of the road and the centre of the image. Returns 0 if no 
-        road lines are found on either side.
-        """
         if self.state == 'road' or self.state == 'truck':
             gray_img = cv2.cvtColor(img, cv2.COLOR_BGR2GRAY)
             mask = cv2.inRange(gray_img, self.road_min_white_val, self.road_max_white_val)
@@ -203,9 +202,24 @@ class Driver():
         elif self.state == 'tunnel':
             mask = self.find_tunnel(img, ret_mask=True)
             self.road_buffer = self.tunnel_pid_height
+            self.road_line_width = 350
+        elif self.state == 'mountain':
+            mask = cv2.cvtColor(self.thresh_desert(img), cv2.COLOR_BGR2GRAY)
+            self.road_buffer = 215
             self.road_line_width = 450
+            # cv2.imshow('mountain mask', cv2.resize(mask, (self.img_width // 2, self.img_height // 2)))
+            # cv2.waitKey(1)
+            uh_road = 37; us_road = 255; uv_road = 255
+            lh_road = 0; ls_road = 27; lv_road = 110
+            lower_hsv_road = np.array([lh_road, ls_road, lv_road])
+            upper_hsv_road = np.array([uh_road, us_road, uv_road])
+            road_mask = cv2.inRange(cv2.cvtColor(img, cv2.COLOR_BGR2HSV), lower_hsv_road, upper_hsv_road)
 
         road_centre = self.find_road_centre(mask, self.road_buffer, self.img_width, self.img_height)
+        # mask_image = cv2.cvtColor(mask, cv2.COLOR_GRAY2BGR)
+        # cv2.circle(mask_image, (road_centre, self.img_height - self.road_buffer), 5, (0, 0, 255), -1)
+        # cv2.imshow('mask', cv2.resize(mask_image, (self.img_width // 2, self.img_height // 2)))
+        # cv2.waitKey(1)
 
         if road_centre != -1:
             error = ((self.img_width // 2) - road_centre) / (self.img_width // 2)
@@ -214,24 +228,20 @@ class Driver():
             print('no road detected, going to truck state')
             self.state = 'truck'
             self.truck_init_cycle = self.cycle_count
-        elif self.truck_turn_dir == 'left':
+        elif self.truck_turn_dir == 'left' and self.state == 'truck':
             error = self.truck_left_turn_amplifier * ((self.img_width // 2) - (self.img_width // 4)) / (self.img_width // 2)
-        elif self.truck_turn_dir == 'right':
+        elif self.truck_turn_dir == 'right' and self.state == 'truck':
             error = ((self.img_width // 2) - (3 * self.img_width // 4)) / (self.img_width // 2)
         else:
             error = 0
+        
+        if self.state == 'mountain' and road_mask[self.img_height - 215, road_centre] != 255: # and self.boost_count < 10:
+            # print('road centre not on the road')
+            error = 0 #1.4 * ((self.img_width // 2) - (self.img_width // 4)) / (self.img_width // 2)
+            self.boost = True
         return error
     
     def check_red(self, img, ret_angle=False, ret_y=False):
-        """
-        Checks if red is found in the image with an area greater than red_line_min_area.
-
-        Parameters:
-        img (numpy.ndarray): The input image.
-
-        Returns:
-        bool: Returns True if red is found in the image with an area greater than red_line_min_area, otherwise False.
-        """
         uh_red = 255; us_red = 255; uv_red = 255
         lh_red = 90; ls_red = 50; lv_red = 230
         lower_hsv_red = np.array([lh_red, ls_red, lv_red])
@@ -259,15 +269,6 @@ class Driver():
 
     # return true if the pedestrian is on the cross walk or within the 
     def check_pedestrian(self, img):
-        """
-        Checks if a pedestrian is on the crosswalk or within a buffer distance to the road.
-
-        Parameters:
-        img (numpy.ndarray): The input image.
-
-        Returns:
-        bool: Returns True if a pedestrian is detected on the crosswalk or within the buffer, otherwise False.
-        """
         cropped_img = img[self.ped_crop_y_min:self.ped_crop_y_max, self.ped_crop_x_min:self.ped_crop_x_max]
         height, width = cropped_img.shape[:2]
         fg_mask = self.bg_sub.apply(cropped_img)
@@ -304,18 +305,6 @@ class Driver():
             return False
         
     def drive_robot(self, linear, angular):
-        """
-        Publishes a velocity command. If the linear velocity to be published is greater than or
-        less than the current linear velocity by more/less than 1.5, the function gradually
-        increases/decreases the linear velocity. 
-
-        Parameters:
-        linear (float): The linear velocity in the x direction.
-        angular (float): The angular velocity in the z direction.
-
-        Returns:
-        None
-        """
         if linear >  self.move.linear.x + self.speed_buffer:
             rate = rospy.Rate(self.accel_freq)
             vel = self.move.linear.x
@@ -426,7 +415,7 @@ class Driver():
         mask = cv2.inRange(hsv_img, lower_hsv, upper_hsv)
 
         contours, _ = cv2.findContours(mask, cv2.RETR_TREE, cv2.CHAIN_APPROX_SIMPLE)
-        contours = sorted(contours, key=lambda contour: cv2.arcLength(contour, True), reverse=True)
+        contours = sorted(contours, key=lambda contour: cv2.arcLength(contour, True), reverse=True) # don't think this line is necessary
         contours = [cnt for cnt in contours if cv2.arcLength(cnt, True) > self.desert_min_arc_length 
                     and cv2.boundingRect(cnt)[3] > self.desert_line_cnt_min_height ]
         if len(contours) == 0:
@@ -436,7 +425,29 @@ class Driver():
 
         blank_img = np.zeros_like(img)
 
-        return cv2.fillPoly(blank_img, approx_cnts, (255, 255, 255))
+        if self.state == 'desert':
+            return cv2.fillPoly(blank_img, approx_cnts, (255, 255, 255))
+        elif self.state == 'mountain':
+            road_1 = cv2.fillPoly(blank_img, approx_cnts, (255, 255, 255))
+            lv2 = 173
+            lower_hsv2 = np.array([lh, ls, lv2])
+            mask2 = cv2.inRange(hsv_img, lower_hsv2, upper_hsv)
+            contours2, _ = cv2.findContours(mask2, cv2.RETR_TREE, cv2.CHAIN_APPROX_SIMPLE)
+            contours2 = sorted(contours2, key=lambda contour: cv2.arcLength(contour, True), reverse=True)
+            contours2 = [cnt for cnt in contours2 if cv2.arcLength(cnt, True) > self.desert_min_arc_length
+                        and cv2.boundingRect(cnt)[3] > self.desert_line_cnt_min_height]
+            if len(contours2) == 0:
+                return road_1
+            epsilon2 = 0.01 * cv2.arcLength(contours2[0], True)
+            approx_cnts2 = [cv2.approxPolyDP(cnt, epsilon2, True) for cnt in contours2]
+            blank_img2 = np.zeros_like(img)
+            road_2 = cv2.fillPoly(blank_img2, approx_cnts2, (255, 255, 255))
+
+            total_road = cv2.bitwise_or(road_1, road_2)
+            # cv2.imshow('mountain mask', cv2.resize(total_road, (self.img_width // 2, self.img_height // 2)))
+            # cv2.waitKey(1)
+            return total_road
+        return blank_img
 
     # returns true if cactus contour area within range
     def check_cactus(self, img):
@@ -488,12 +499,39 @@ class Driver():
         x, y, w, h = cv2.boundingRect(combined_contour)
         return x + w // 2 if not ret_area else cv2.contourArea(combined_contour)
 
+    # finds middle x value of sign at top of mountain
+    def find_mountain_sign(self, img, check_area=False):
+        lower_hsv = (5,20,0)
+        upper_hsv = (150,255,255)
+        hsv_img = cv2.cvtColor(img, cv2.COLOR_BGR2HSV)
+        blue_mask = cv2.inRange(hsv_img, lower_hsv, upper_hsv)
+
+        gray_img = cv2.cvtColor(img, cv2.COLOR_BGR2GRAY)
+        white_mask = cv2.inRange(gray_img, 95, 105)
+
+        blue_mask_not = cv2.bitwise_not(blue_mask)
+        combined_mask = cv2.bitwise_and(white_mask, blue_mask_not)
+
+        # cv2.imshow('sign mask', cv2.resize(combined_mask, (self.img_width // 2, self.img_height // 2)))
+        # cv2.waitKey(1)
+
+        contours, _ = cv2.findContours(combined_mask, cv2.RETR_TREE, cv2.CHAIN_APPROX_SIMPLE)
+        if contours.__len__() == 0:
+            return -1
+        largest_contour = max(contours, key=cv2.contourArea)
+        x, y, w, h = cv2.boundingRect(largest_contour)
+        if check_area:
+            return cv2.contourArea(largest_contour) < 25000
+        else:
+            return x + w // 2 if cv2.contourArea(largest_contour) > 3000 else -1
+    
     # placeholder for start function
     def start(self):
         # start the timer
         print('starting timer, entering road pid state')
         # self.state = 'road'
-        self.state = 'desert'
+        # self.state = 'desert'
+        self.state = 'tunnel'
     
     # main loop for the driver
     def run(self):
@@ -627,13 +665,13 @@ class Driver():
                             error = self.kp * (self.tunnel_mid_x - tunnel_mid) / self.tunnel_mid_x
                             self.drive_robot(self.lin_speed, self.rot_speed * error)
                     else:
-                        while self.check_magenta(self.img, ret_y=True) <  400: #self.yoda_mag_y_exit:
+                        while self.check_magenta(self.img, ret_y=True) < 400: #self.yoda_mag_y_exit:
                             mag_x = self.check_magenta(self.img, ret_midx=True)
                             error = self.kp * (self.yoda_mag_x_mid - mag_x) / self.yoda_mag_x_mid
                             self.drive_robot(0.6, self.rot_speed * error)
                             # print('y: ', self.check_magenta(self.img, ret_y=True))
                         print('going straight now')
-                        while self.check_magenta(self.img, ret_y=True) < 560:
+                        while self.check_magenta(self.img, ret_y=True) < 570:
                             self.drive_robot(0.5, 0)
                             # print('y: ', self.check_magenta(self.img, ret_y=True))
                         print('close to magenta, angling to be straight')
@@ -641,30 +679,71 @@ class Driver():
                             angle = self.check_magenta(self.img, ret_angle=True)
                             # print('angle: ', angle)
                             if angle < 45:
-                                self.drive_robot(0.1, -1 * angle * 0.1)
+                                self.drive_robot(0, -1 * angle * 0.1)
                             else:
-                                self.drive_robot(0.1, (90 - angle) * 0.1)
+                                self.drive_robot(0, (90 - angle) * 0.1)
                         self.drive_robot(0, 0)
                         print('going to tunnel state')
-                        # self.drive_robot(self.lin_speed, -0.8)
-                        # rospy.sleep(0.2)
+                        self.drive_robot(1.5, 0)
+                        rospy.sleep(0.2)
                         self.state = 'tunnel'
 
             # ------------------ tunnel state ------------------
             elif self.state == 'tunnel':
-                # TODO: TEST THIS
                 if self.find_tunnel(self.img, ret_area=True) > 10000:
-                    # pid with tunnel
-                    # error = 12 * self.get_error(self.img)
-                    # self.drive_robot(0.3, self.rot_speed * error)
-                    self.drive_robot(0.5, 0)
+                    self.drive_robot(1.5, 0)
                 else:
                     print('tunnel contour too small, going to mountain state')
                     self.state = 'mountain'
+                    rospy.sleep(0.5)
 
             # ----------------- mountain state -----------------
             elif self.state == 'mountain':
-                self.drive_robot(self.lin_speed, 0)
+                if not self.found_mountain_lines:
+                    while not np.any(self.thresh_desert(self.img)):
+                        # print('no lines found')
+                        self.drive_robot(0.75, 0)
+                    self.found_mountain_lines = True
+                    print('found mountain lines, going to pid')
+                    rospy.sleep(0.4)
+                    self.mountain_start_cycle = self.cycle_count
+                else:
+                    while self.find_mountain_sign(self.img) == -1:
+                        error = self.get_error(self.img)
+                        derivative = (error - self.prev_error) / self.dt
+                        self.prev_error = error
+                        rot_amp = 8 * error + self.kd * derivative
+                        if self.boost and 150 < self.cycle_count - self.mountain_start_cycle and self.cycle_count > self.boost_cycle + 2:
+                            self.drive_robot(0.5, 0.7)
+                            self.boost = False
+                            self.boost_cycle = self.cycle_count
+                            print('boosting!!!')
+                            # self.boost_count += 1
+                        else:
+                            rot_speed = 1.2 * rot_amp
+                            if rot_speed < -1.5:
+                                rot_speed = -1.5
+                            self.drive_robot(0.3, rot_speed)
+                    print('found sign, going to sign state')
+                    self.state = 'mountain top'
+
+            elif self.state == 'mountain top':
+                if not self.find_mountain_sign(self.img, check_area=True):
+                    sign_mid_x = self.find_mountain_sign(self.img)
+                    print('pid ing to sign')
+                    if sign_mid_x == -1:
+                        self.drive_robot(0.3, 0)
+                    else:
+                        error = (self.img_width // 2 - sign_mid_x) / (self.img_width // 2)
+                        self.drive_robot(0.3, self.rot_speed * error)
+                else:
+                    print('close to sign, stopping')
+                    self.state = 'clue submission'
+                    self.drive_robot(0, 0)
+
+            elif self.state == 'clue submission':
+                self.drive_robot(0, 0)
+ 
         
         # rospy.sleep(0.1)
 
