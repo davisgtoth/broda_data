@@ -449,6 +449,24 @@ class Driver():
             return total_road
         return blank_img
 
+    def check_yoda(self, img):
+        uh = 68; us = 255; uv = 255
+        lh = 57; ls = 96; lv = 89
+        lower_hsv = np.array([lh, ls, lv])
+        upper_hsv = np.array([uh, us, uv])
+
+        hsv_img = cv2.cvtColor(img, cv2.COLOR_BGR2HSV)
+        mask = cv2.inRange(hsv_img, lower_hsv, upper_hsv)
+
+        contours, _ = cv2.findContours(mask, cv2.RETR_TREE, cv2.CHAIN_APPROX_SIMPLE)
+        if contours.__len__() == 0:
+            return False
+        largest_contour = max(contours, key=cv2.contourArea)
+        if cv2.contourArea(largest_contour) > 1300:
+            return True
+        else:
+            return False
+    
     # returns true if cactus contour area within range
     def check_cactus(self, img):
         uh_cactus = 66; us_cactus = 255; uv_cactus = 255
@@ -529,14 +547,9 @@ class Driver():
     def start(self):
         # start the timer
         print('starting timer, entering road pid state')
-<<<<<<< HEAD
         # self.state = 'road'
-        # self.state = 'desert'
-        self.state = 'tunnel'
-=======
-        self.state = 'road'
-        #self.state = 'desert'
->>>>>>> 61e21f48627e0169e7eed68bdf681939d7d1c729
+        self.state = 'desert'
+        # self.state = 'tunnel'
     
     # main loop for the driver
     def run(self):
@@ -649,10 +662,11 @@ class Driver():
             # -------------------- yoda state --------------------
             elif self.state == 'yoda':
                 if not self.reached_yoda:
-                    print('getting close to cactus')
-                    while not self.check_cactus(self.img):
-                        self.drive_robot(self.cactus_lin_speed, 0)
-                    print('turning to see tunnel')
+                    while not self.check_yoda(self.img):
+                        print('getting close to cactus')
+                        while not self.check_cactus(self.img):
+                            self.drive_robot(self.cactus_lin_speed, 0)
+                        print('turning to see tunnel')
                     while self.find_tunnel(self.img) < self.tunnel_mid_x:
                         self.drive_robot(0, self.tunnel_turn_speed)
                     print('all good, ready to go over the hill')
@@ -670,13 +684,13 @@ class Driver():
                             error = self.kp * (self.tunnel_mid_x - tunnel_mid) / self.tunnel_mid_x
                             self.drive_robot(self.lin_speed, self.rot_speed * error)
                     else:
-                        while self.check_magenta(self.img, ret_y=True) < 400: #self.yoda_mag_y_exit:
+                        while self.check_magenta(self.img, ret_y=True) < 410: #self.yoda_mag_y_exit:
                             mag_x = self.check_magenta(self.img, ret_midx=True)
                             error = self.kp * (self.yoda_mag_x_mid - mag_x) / self.yoda_mag_x_mid
                             self.drive_robot(0.6, self.rot_speed * error)
                             # print('y: ', self.check_magenta(self.img, ret_y=True))
                         print('going straight now')
-                        while self.check_magenta(self.img, ret_y=True) < 570:
+                        while self.check_magenta(self.img, ret_y=True) < 590:
                             self.drive_robot(0.5, 0)
                             # print('y: ', self.check_magenta(self.img, ret_y=True))
                         print('close to magenta, angling to be straight')
@@ -728,7 +742,7 @@ class Driver():
                             rot_speed = 1.2 * rot_amp
                             if rot_speed < -1.5:
                                 rot_speed = -1.5
-                            self.drive_robot(0.3, rot_speed)
+                            self.drive_robot(0.4, rot_speed)
                     print('found sign, going to sign state')
                     self.state = 'mountain top'
 

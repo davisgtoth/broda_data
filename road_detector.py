@@ -280,7 +280,7 @@ def thresh_desert(img):
         lower_hsv_road = np.array([lh_road, ls_road, lv_road])
         upper_hsv_road = np.array([uh_road, us_road, uv_road])
         road_mask = cv2.inRange(hsv_img, lower_hsv_road, upper_hsv_road)
-        cv2.imshow('road mask', cv2.resize(road_mask, (road_mask.shape[1]//2, road_mask.shape[0]//2)))
+        # cv2.imshow('road mask', cv2.resize(road_mask, (road_mask.shape[1]//2, road_mask.shape[0]//2)))
 
         # right_most_white = -1
         # for i in range(1, road_mask.shape[1]):
@@ -300,8 +300,8 @@ def thresh_desert(img):
 
         desert_road_1 = draw_desert_lines(mask1)
         desert_road_2 = draw_desert_lines(mask2)
-        cv2.imshow('desert road 1', cv2.resize(desert_road_1, (desert_road_1.shape[1]//2, desert_road_1.shape[0]//2)))
-        cv2.imshow('desert road 2', cv2.resize(desert_road_2, (desert_road_2.shape[1]//2, desert_road_2.shape[0]//2)))
+        # cv2.imshow('desert road 1', cv2.resize(desert_road_1, (desert_road_1.shape[1]//2, desert_road_1.shape[0]//2)))
+        # cv2.imshow('desert road 2', cv2.resize(desert_road_2, (desert_road_2.shape[1]//2, desert_road_2.shape[0]//2)))
 
         desert_lines_or = cv2.bitwise_or(desert_road_1, desert_road_2)
 
@@ -322,10 +322,10 @@ def thresh_desert(img):
                  (0, 255, 0), 2)
         cv2.circle(desert_lines_or, (road_centre, desert_lines_or.shape[0] - ylvl), 10, (0, 0, 255), -1)
 
-        cv2.imshow('desert lines or', cv2.resize(desert_lines_or, (desert_lines_or.shape[1]//2, desert_lines_or.shape[0]//2)))
+        # cv2.imshow('desert lines or', cv2.resize(desert_lines_or, (desert_lines_or.shape[1]//2, desert_lines_or.shape[0]//2)))
 
-        cv2.imshow('original image', cv2.resize(img, (img.shape[1]//2, img.shape[0]//2)))
-        cv2.waitKey(0)
+        # cv2.imshow('original image', cv2.resize(img, (img.shape[1]//2, img.shape[0]//2)))
+        # cv2.waitKey(0)
 
         # contours, _ = cv2.findContours(mask1, cv2.RETR_TREE, cv2.CHAIN_APPROX_SIMPLE)
         # # contours = sorted(contours, key=lambda contour: cv2.arcLength(contour, True), reverse=True)
@@ -363,7 +363,18 @@ def draw_desert_lines(img):
 #     cv2.imshow('lines and original image', np.hstack((lines, image)))
 #     cv2.waitKey(0)
 
-imgs = [cv2.imread(f'img_{i}.jpg') for i in range(19)]
+# imgs = [cv2.imread(f'img_{i}.jpg') for i in range(19)]
 
-for image in imgs:
-    thresh_desert(image)
+# for image in imgs:
+#     thresh_desert(image)
+
+yoda_image = cv2.imread('cactus_images_1/img_2.jpg')
+uh_yoda = 68; us_yoda = 255; uv_yoda = 255
+lh_yoda = 57; ls_yoda = 96; lv_yoda = 89
+lower_hsv_yoda = np.array([lh_yoda, ls_yoda, lv_yoda])
+upper_hsv_yoda = np.array([uh_yoda, us_yoda, uv_yoda])
+hsv_yoda = cv2.cvtColor(yoda_image, cv2.COLOR_BGR2HSV)
+yoda_mask = cv2.inRange(hsv_yoda, lower_hsv_yoda, upper_hsv_yoda)
+contours, _ = cv2.findContours(yoda_mask, cv2.RETR_TREE, cv2.CHAIN_APPROX_SIMPLE)
+largest_contour = max(contours, key=cv2.contourArea)
+print(cv2.contourArea(largest_contour))
