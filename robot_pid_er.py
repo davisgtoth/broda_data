@@ -663,10 +663,11 @@ class Driver():
             elif self.state == 'yoda':
                 if not self.reached_yoda:
                     while not self.check_yoda(self.img):
-                        print('getting close to cactus')
-                        while not self.check_cactus(self.img):
-                            self.drive_robot(self.cactus_lin_speed, 0)
-                        print('turning to see tunnel')
+                        self.drive_robot(0, 0)
+                    print('getting close to cactus')
+                    while not self.check_cactus(self.img):
+                        self.drive_robot(self.cactus_lin_speed, 0)
+                    print('turning to see tunnel')
                     while self.find_tunnel(self.img) < self.tunnel_mid_x:
                         self.drive_robot(0, self.tunnel_turn_speed)
                     print('all good, ready to go over the hill')
