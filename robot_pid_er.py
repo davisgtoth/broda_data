@@ -97,7 +97,6 @@ class Driver():
         self.magneta_max_angle = 89.5
         self.magenta_angle_lin_speed = 0.2
         self.magenta_angle_rot_speed = 0.2
-        self.magenta_y_buffer = 10 # pixels above bottom to stop when reach magenta line
 
         # Yoda detection variables
         self.reached_yoda = False
@@ -119,15 +118,8 @@ class Driver():
         self.yoda_mag_x_mid = 550 # x coord of the magenta line to pid to
         self.yoda_mag_y_exit = 700 # starts going to tunnel state when y value of mageneta line is greater than this
 
-        self.yoda_mag_lin_speed = 0.6
-        self.yoda_mag_y_straight = 400 # stop pid to magenta line and go straight when y value of magenta line is greater than this
-        self.yoda_mag_y_turn = 550 # start turning to line up with tunnel when y value of magenta line is greater than this
-        self.yoda_mag_angle_lin_speed = 0.1
-        self.yoda_mag_angle_rot_speed = 0.1
-
         # Tunnel detection variables
         self.tunnel_pid_height = 400
-        self.tunnel_min_area = 10000 # exits tunnel state when tunnel contour area less than this
 
     # callback function for camera subscriber
     def callback(self, msg):
@@ -500,8 +492,8 @@ class Driver():
     def start(self):
         # start the timer
         print('starting timer, entering road pid state')
-        # self.state = 'road'
-        self.state = 'desert'
+        self.state = 'road'
+        #self.state = 'desert'
     
     # main loop for the driver
     def run(self):
@@ -601,7 +593,7 @@ class Driver():
                             self.drive_robot(self.magenta_angle_lin_speed, (90 - angle) * self.magenta_angle_rot_speed)
 
                     print('done angling, moving closer')
-                    while self.check_magenta(self.img, ret_y=True) < self.img_height - self.magenta_y_buffer:
+                    while self.check_magenta(self.img, ret_y=True) < self.img_height - 10:
                         self.drive_robot(self.magenta_angle_lin_speed, 0)
                    
                     self.drive_robot(0, 0)
@@ -635,41 +627,37 @@ class Driver():
                             error = self.kp * (self.tunnel_mid_x - tunnel_mid) / self.tunnel_mid_x
                             self.drive_robot(self.lin_speed, self.rot_speed * error)
                     else:
-                        while self.check_magenta(self.img, ret_y=True) <  self.yoda_mag_y_straight: #self.yoda_mag_y_exit:
+                        while self.check_magenta(self.img, ret_y=True) <  400: #self.yoda_mag_y_exit:
                             mag_x = self.check_magenta(self.img, ret_midx=True)
                             error = self.kp * (self.yoda_mag_x_mid - mag_x) / self.yoda_mag_x_mid
-<<<<<<< HEAD
-                            self.drive_robot(self.yoda_mag_lin_speed, self.rot_speed * error)
-                            # print('y: ', self.check_magenta(self.img, ret_y=True))
-                        print('going straight now')
-                        while self.check_magenta(self.img, ret_y=True) < self.yoda_mag_y_turn:
-                            self.drive_robot(self.lin_speed, 0)
-=======
                             self.drive_robot(0.6, self.rot_speed * error)
                             # print('y: ', self.check_magenta(self.img, ret_y=True))
                         print('going straight now')
                         while self.check_magenta(self.img, ret_y=True) < 560:
                             self.drive_robot(0.5, 0)
->>>>>>> 5644e41a72dc289ff63ccad829a79e09af430149
                             # print('y: ', self.check_magenta(self.img, ret_y=True))
                         print('close to magenta, angling to be straight')
-                        while self.magneta_min_angle < self.check_magenta(self.img, ret_angle=True) < self.magneta_max_angle:
+                        while 0.5 < self.check_magenta(self.img, ret_angle=True) < 89.5:
                             angle = self.check_magenta(self.img, ret_angle=True)
                             # print('angle: ', angle)
                             if angle < 45:
-                                self.drive_robot(self.yoda_mag_angle_lin_speed, -1 * angle * self.yoda_mag_angle_rot_speed)
+                                self.drive_robot(0.1, -1 * angle * 0.1)
                             else:
-                                self.drive_robot(self.yoda_mag_angle_lin_speed, (90 - angle) * self.yoda_mag_angle_rot_speed)
+                                self.drive_robot(0.1, (90 - angle) * 0.1)
+                        self.drive_robot(0, 0)
                         print('going to tunnel state')
+                        # self.drive_robot(self.lin_speed, -0.8)
+                        # rospy.sleep(0.2)
                         self.state = 'tunnel'
 
             # ------------------ tunnel state ------------------
             elif self.state == 'tunnel':
-                if self.find_tunnel(self.img, ret_area=True) > self.tunnel_min_area:
+                # TODO: TEST THIS
+                if self.find_tunnel(self.img, ret_area=True) > 10000:
                     # pid with tunnel
                     # error = 12 * self.get_error(self.img)
                     # self.drive_robot(0.3, self.rot_speed * error)
-                    self.drive_robot(self.lin_speed, 0)
+                    self.drive_robot(0.5, 0)
                 else:
                     print('tunnel contour too small, going to mountain state')
                     self.state = 'mountain'

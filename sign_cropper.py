@@ -74,15 +74,30 @@ def cropToWord(img):
     lower_hsv = (5,20,0)
     upper_hsv = (150,255,255)
     hsv_img = cv2.cvtColor(word, cv2.COLOR_BGR2HSV)
-    mask = cv2.inRange(hsv_img, lower_hsv, upper_hsv)
+    h, s, v = cv2.split(hsv_img)
+    lim = 0
+    v[v > lim] = 255
+    v[v <= lim] += 255
+    final_hsv = cv2.merge((h, s, v))
+    mask = cv2.inRange(final_hsv, lower_hsv, upper_hsv)
     contours, _ = cv2.findContours(mask, cv2.RETR_TREE, cv2.CHAIN_APPROX_SIMPLE)
-    
     startX = w_
     startY = h_
     endX = 0
     endY = 0
-    for c in contours:
-      x, y, w, h = cv2.boundingRect(c)
+    for cnt in contours:
+      box = cv2.minAreaRect(cnt)
+      points = cv2.boxPoints(box)
+      for p in points:
+        if p[0] <= startX:
+          startX = p[0]
+        if p[0] >= endX:
+          endX = p[0]
+        if p[1] <= startY:
+          startY = p[1]
+        if p[1] >= endY:
+          endY = p[1]
+      '''
       if x <= startX:
         startX = x
       if w+x >= endX:
@@ -91,7 +106,8 @@ def cropToWord(img):
         startY = y
       if h+y >= endY:
         endY = h+y
-    cropped = word[startY:endY, startX:endX]
+        '''    
+    cropped = word[int(round(startY)):int(round(endY)), int(round(startX)):int(round(endX))]
     h, w = cropped.shape[:2]
     ratio = w/h
     newY = 90
@@ -113,10 +129,14 @@ def wordToLetters(word):
   letters = []
   h_, w_ = word.shape[:2]
   gray = cv2.cvtColor(word, cv2.COLOR_BGR2GRAY)
-  _, thresh1 = cv2.threshold(gray, 0, 255, cv2.THRESH_OTSU | cv2.THRESH_BINARY_INV)
-  rect_kernel = cv2.getStructuringElement(cv2.MORPH_RECT, (3, 3))
+  blur = cv2.blur(gray, (9,9))
+  _, thresh1 = cv2.threshold(blur, 0, 255, cv2.THRESH_OTSU | cv2.THRESH_BINARY_INV)
+  rect_kernel = cv2.getStructuringElement(cv2.MORPH_RECT, (1, 1))
+  kernel = np.ones((6, 6), np.uint8)
   dilation = cv2.dilate(thresh1, rect_kernel, iterations = 1)
-  contours, _ = cv2.findContours(dilation, cv2.RETR_TREE, cv2.CHAIN_APPROX_SIMPLE)
+  erosion = cv2.erode(dilation, kernel, iterations = 1)
+  cv2.imshow("mask", erosion)
+  contours, _ = cv2.findContours(erosion, cv2.RETR_TREE, cv2.CHAIN_APPROX_SIMPLE)
   threshArea = 500
   possibleLetters = []
   letters = []
@@ -149,6 +169,7 @@ def wordToLetters(word):
       gray = cv2.cvtColor(letter, cv2.COLOR_BGR2GRAY)
       _, thresh1 = cv2.threshold(gray, 0, 255, cv2.THRESH_OTSU | cv2.THRESH_BINARY_INV)
       letter = cv2.dilate(thresh1, rect_kernel, iterations = 1)
+      erosion = cv2.erode(dilation, kernel, iterations = 1)
       letters.append(letter)
   '''for i in range(newW):
     letter = word[0:h_, i*int(wAvg):(i+1)*int(wAvg)]
@@ -157,8 +178,15 @@ def wordToLetters(word):
     _, thresh1 = cv2.threshold(gray, 0, 255, cv2.THRESH_OTSU | cv2.THRESH_BINARY_INV)
     letter = cv2.dilate(thresh1, rect_kernel, iterations = 1)
     letters.append(letter)'''
+  
 
   return letters
+
+'''height, width = cropped.shape[:2]
+    src_pts = np.array([lowerLeft, upperLeft, lowerRight, upperRight], dtype=np.float32)
+    dst_pts = np.array([[0, 0], [0, h_], [w_, 0], [w_, h_]], dtype=np.float32)
+    M = cv2.getPerspectiveTransform(src_pts, dst_pts)
+    cropped_img = cv2.warpPerspective(word, M, (w_, h_))'''
 
 def signToLetters(sign):
   """!
@@ -169,9 +197,42 @@ def signToLetters(sign):
     @return     category: cropped and scaled images of letters in category
                 clue: cropped and scaled images of letters in clue
     """
+  img = cv2.resize(sign, (600,400))
+
+  yRange = (250, 340)
+  startX = 30
+  endX = 75
+  inc = 45
+  numChar = 12
+
+  #clue = []
+
+  
   words = cropToWord(sign)
   category = wordToLetters(words[0])
   clue = wordToLetters(words[1])
   cv2.imshow("clue", np.concatenate(clue, axis=0))
   cv2.waitKey(1)
-  return np.array(category), np.array(clue)
+  return np.array(clue)
+'''
+  rect_kernel = cv2.getStructuringElement(cv2.MORPH_RECT, (3, 3))
+  kernel = np.ones((5, 5), np.uint8)
+
+  for i in range(numChar):
+    letter = img[yRange[0]:yRange[1], startX:endX]
+    letter = cv2.resize(letter, (60, 90),  interpolation= cv2.INTER_LINEAR)
+    gray = cv2.cvtColor(letter, cv2.COLOR_BGR2GRAY)
+    _, thresh1 = cv2.threshold(gray, 0, 255, cv2.THRESH_OTSU | cv2.THRESH_BINARY_INV)
+    rect_kernel = cv2.getStructuringElement(cv2.MORPH_RECT, (1, 1))
+    kernel = np.ones((4, 4), np.uint8)
+    dilation = cv2.dilate(thresh1, rect_kernel, iterations = 1)
+    erosion = cv2.erode(dilation, kernel, iterations = 1)
+    clue.append(erosion)
+    startX += inc
+    endX += inc
+  cv2.imshow("clue", np.concatenate(clue, axis=0))
+  cv2.waitKey(1)
+  return np.array(clue)
+
+  '''
+  
