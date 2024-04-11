@@ -6,6 +6,7 @@ import numpy as np
 from cv_bridge import CvBridge
 from sensor_msgs.msg import Image
 from geometry_msgs.msg import Twist
+from std_msgs.msg import String
 
 import robot_sign_reader
 
@@ -16,6 +17,7 @@ class Driver():
         self.bridge = CvBridge()
         rospy.Subscriber("/R1/pi_camera/image_raw", Image, self.callback)
         self.vel_pub = rospy.Publisher('/R1/cmd_vel', Twist, queue_size=1)
+        self.score_pub = rospy.Publisher('/score_tracker', String, queue_size=1)
 
         self.state = 'init' # init, road, ped, truck, desert, yoda, tunnel, mountain
         
@@ -29,9 +31,9 @@ class Driver():
         # PID controller variables
         self.move = Twist()
         self.lin_speed = 0.5 # defualt PID linear speed of robot
-        self.sign_lin_speed = 0.3 # slower PID linear speed for sign reading
+        self.sign_lin_speed = 0.25 # slower PID linear speed for sign reading
         self.rot_speed = 1.0 # base PID angular speed of robot
-        self.sign_rot_speed = 0.9 # slower PID angular speed for sign reading
+        self.sign_rot_speed = 1.1 # slower PID angular speed for sign reading
 
         self.road_line_width = 150
         self.road_min_white_val = 250
@@ -65,9 +67,9 @@ class Driver():
         self.ped_min_area = 400 # minimum contour area for detecting the pedestrian
                 
         self.ped_safe_count = 0
-        self.ped_safe_count_buffer = 10
+        self.ped_safe_count_buffer = 5
         
-        self.ped_lin_speed = 2.2 # linear speed of robot when crossing crosswalk
+        self.ped_lin_speed = 2.5 # linear speed of robot when crossing crosswalk
         self.ped_ang_speed = 0 # angular speed of robot when crossing crosswalk
         self.ped_sleep_time = 0.01 # time to sleep when crossing crosswalk
 
@@ -76,7 +78,7 @@ class Driver():
         self.truck_init_cycle = 0
         self.truck_cycle_buffer = 15
 
-        self.truck_left_area = 800
+        self.truck_left_area = 600 # goes right if truck area is bigger than this
         self.truck_wait_area = 7000
         
         self.truck_min_area = 5000 # used in function, but never actually called, check later
@@ -92,23 +94,46 @@ class Driver():
         self.desert_min_arc_length = 750 
         self.desert_line_cnt_min_height = 125
         
-        self.desert_min_magenta_area = 8000
+        self.desert_min_magenta_area = 5000
         self.desert_past_magenta_line_area = 1000
         
         self.desert_road_buffer = 250
 
         self.magneta_min_angle = 0.5
         self.magneta_max_angle = 89.5
-        self.magenta_angle_lin_speed = 0.4
-        self.magenta_angle_rot_speed = 0.3
+        self.magenta_angle_lin_speed = 0.2
+        self.magenta_angle_rot_speed = 0.2
+        self.magenta_y_buffer = 10 # pixels above bottom to stop when reach magenta line
 
         # Yoda detection variables
         self.reached_yoda = False
-        self.cactus_min_area = 630
-        self.cactus_max_area = 800
-        self.tunnel_min_area = 30
+        
+        self.cactus_min_area = 640
+        self.cactus_max_area = 825
+        self.cactus_lin_speed = 0.6
+        
+        self.tunnel_turn_speed = 3.0
+        self.tunnel_min_area = 20
         self.tunnel_mid_x = 500
+        
         self.over_hill = False
+        self.hill_lin_speed = 0.5
+        self.hill_rot_speed = -0.1
+
+        self.yoda_mag_min_area_for_y = 5000 # get the y value of the magenta line only when the contour area is greater than this
+        self.yoda_find_mag_min_area = 100 # minimum contour area of the magenta line to say that it detects the line
+        self.yoda_mag_x_mid = 550 # x coord of the magenta line to pid to
+        self.yoda_mag_y_exit = 700 # starts going to tunnel state when y value of mageneta line is greater than this
+
+        self.yoda_mag_lin_speed = 0.6
+        self.yoda_mag_y_straight = 400 # stop pid to magenta line and go straight when y value of magenta line is greater than this
+        self.yoda_mag_y_turn = 550 # start turning to line up with tunnel when y value of magenta line is greater than this
+        self.yoda_mag_angle_lin_speed = 0.1
+        self.yoda_mag_angle_rot_speed = 0.1
+
+        # Tunnel detection variables
+        self.tunnel_pid_height = 400
+        self.tunnel_min_area = 10000 # exits tunnel state when tunnel contour area less than this
 
     # callback function for camera subscriber
     def callback(self, msg):
@@ -485,8 +510,6 @@ class Driver():
                 cropped_img = my_bot.check_if_sign(self.img) # returns None if no sign detected
                 if cropped_img is not None:
                     my_bot.compare_sign(cropped_img) # changes self.sign_img if new sign is larger
-                    cv2.imshow('sign', my_bot.sign_img)
-                    cv2.waitKey(1)
                 if self.reached_crosswalk == False and self.check_red(self.img):
                     print('red detected, going to ped state')
                     self.state = 'ped'
@@ -535,8 +558,6 @@ class Driver():
                 cropped_img = my_bot.check_if_sign(self.img) # returns None if no sign detected
                 if cropped_img is not None:
                     my_bot.compare_sign(cropped_img) # changes self.sign_img if new sign is larger
-                    cv2.imshow('sign', my_bot.sign_img)
-                    cv2.waitKey(1)
                 if not self.reached_truck:
                     self.drive_robot(0, 0)
                     truck_area, truck_mid = self.check_truck(self.img, at_intersection=True)
@@ -576,8 +597,6 @@ class Driver():
                 cropped_img = my_bot.check_if_sign(my_bot.img) # returns None if no sign detected
                 if cropped_img is not None:
                     my_bot.compare_sign(cropped_img) # changes self.sign_img if new sign is larger
-                    cv2.imshow('sign', my_bot.sign_img)
-                    cv2.waitKey(1)
                 if self.check_magenta(self.img):
                     self.drive_robot(0, 0)
                     print('detected magenta')
@@ -607,15 +626,13 @@ class Driver():
                 cropped_img = my_bot.check_if_sign(my_bot.img) # returns None if no sign detected
                 if cropped_img is not None:
                     my_bot.compare_sign(cropped_img) # changes self.sign_img if new sign is larger
-                    cv2.imshow('sign', my_bot.sign_img)
-                    cv2.waitKey(1)
                 if not self.reached_yoda:
                     print('getting close to cactus')
                     while not self.check_cactus(self.img):
-                        self.drive_robot(0.6, 0)
+                        self.drive_robot(self.cactus_lin_speed, 0)
                     print('turning to see tunnel')
                     while self.find_tunnel(self.img) < self.tunnel_mid_x:
-                        self.drive_robot(0, 4.0)
+                        self.drive_robot(0, self.tunnel_turn_speed)
                     print('all good, ready to go over the hill')
                     self.drive_robot(0, 0)
                     self.reached_yoda = True
@@ -624,39 +641,85 @@ class Driver():
                         tunnel_mid = self.find_tunnel(self.img)
                         if tunnel_mid == -1:
                             while not self.check_magenta(self.img):
-                                self.drive_robot(0.6, -0.2)
+                                self.drive_robot(self.hill_lin_speed, self.hill_rot_speed)
                             print('over the hill now, checking for magenta')
                             self.over_hill = True
                         else:
                             error = self.kp * (self.tunnel_mid_x - tunnel_mid) / self.tunnel_mid_x
                             self.drive_robot(self.lin_speed, self.rot_speed * error)
                     else:
-                        while self.check_magenta(self.img, ret_y=True) < 650:
+                        while self.check_magenta(self.img, ret_y=True) <  400: #self.yoda_mag_y_exit:
                             mag_x = self.check_magenta(self.img, ret_midx=True)
-                            error = self.kp * (500 - mag_x) / 500
-                            self.drive_robot(self.lin_speed, self.rot_speed * error)
-                        print('close to magenta, going to tunnel state')
+                            error = self.kp * (self.yoda_mag_x_mid - mag_x) / self.yoda_mag_x_mid
+                            self.drive_robot(0.6, self.rot_speed * error)
+                            # print('y: ', self.check_magenta(self.img, ret_y=True))
+                        print('going straight now')
+                        while self.check_magenta(self.img, ret_y=True) < 560:
+                            self.drive_robot(0.5, 0)
+                            # print('y: ', self.check_magenta(self.img, ret_y=True))
+                        print('close to magenta, angling to be straight')
+                        while 0.5 < self.check_magenta(self.img, ret_angle=True) < 89.5:
+                            angle = self.check_magenta(self.img, ret_angle=True)
+                            # print('angle: ', angle)
+                            if angle < 45:
+                                self.drive_robot(0.1, -1 * angle * 0.1)
+                            else:
+                                self.drive_robot(0.1, (90 - angle) * 0.1)
+                        self.drive_robot(0, 0)
+                        print('going to tunnel state')
+                        # self.drive_robot(self.lin_speed, -0.8)
+                        # rospy.sleep(0.2)
                         self.state = 'tunnel'
 
             # ------------------ tunnel state ------------------
             elif self.state == 'tunnel':
-                break#self.drive_robot(0, 0)
+                # TODO: TEST THIS
+                if self.find_tunnel(self.img, ret_area=True) > 10000:
+                    # pid with tunnel
+                    # error = 12 * self.get_error(self.img)
+                    # self.drive_robot(0.3, self.rot_speed * error)
+                    self.drive_robot(0.5, 0)
+                else:
+                    print('tunnel contour too small, going to mountain state')
+                    self.state = 'mountain'
 
             # ----------------- mountain state -----------------
             elif self.state == 'mountain':
-                pass
+                self.drive_robot(self.lin_speed, 0)
+
+            # ----------------- finished state -----------------
+            elif self.state == "finished":
+                for i in range(my_bot.num_signs):
+                    message = String()
+                    prediction = my_bot.read_sign(my_bot.num_signs[i])
+                    message.data = "Broda,adorb,"+str(i+1)+","+prediction
+                    self.score_pub.publish(message)
+                end_timer = String()
+                end_timer.data = "Broda,adorb,-1,NA"
+                self.score_pub.publish(end_timer)
+            
+
             if my_bot.sign_img is not None:
                 # display the sign image
-                cv2.imshow('feed', my_bot.img)
-                cv2.waitKey(1)
+                #cv2.imshow('feed', my_bot.img)
+                #cv2.waitKey(1)
                 # check if enough time has elapsed to read the sign
                 current_time = rospy.Time.now()
                 elapsed_time = current_time - my_bot.firstSignTime
                 if elapsed_time > my_bot.durationBetweenSigns:
-                    my_bot.read_sign()
+                    my_bot.signs.append(my_bot.sign_img)
                     my_bot.sign_img = None
-                    my_bot.firstSignTime = None
-        
+            if self.img is not None:
+                cv2.imshow('image', self.img)
+                key = cv2.waitKey(1) & 0xFF
+                if key == ord('s'):
+                    for s in my_bot.signs:
+                        cv2.imshow("sign", s)
+                        my_bot.read_sign(s)
+            if my_bot.num_signs == 0:
+                start_timer = String()
+                start_timer.data = "Broda,adorb,0,NA"
+                self.score_pub.publish(start_timer)
         # rospy.sleep(0.1)
 
 if __name__ == '__main__':

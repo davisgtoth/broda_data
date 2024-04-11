@@ -33,7 +33,9 @@ class SignReader():
         self.img = None
         self.min_sign_area = 6000
 
-        self.nn = load_model('broda_data/my_model04')
+        self.path = '/home/fizzer/broda_data/my_model05'
+        self.nn = load_model(self.path)
+        self.letter_check_num = 10
         
         self.num_pixels_above_bottom = 200
         self.kp = 5
@@ -41,12 +43,13 @@ class SignReader():
         self.rot_speed = 1.0
         self.no_lines_error = 1000
         
+        self.signs = []
         self.sign_img = None
 
         self.num_signs = 0
 
         self.firstSignTime = None
-        self.durationBetweenSigns = rospy.Duration.from_sec(5)
+        self.durationBetweenSigns = rospy.Duration.from_sec(3)
 
     # callback function for robot camera feed 
     def callback(self, msg):
@@ -131,6 +134,9 @@ class SignReader():
             # print('no sign detected - no red')
             return None
         
+        if w < h:
+            return None
+        
         # TODO: add code to see if sign is cut off 
 
         # found a sign !!
@@ -152,7 +158,6 @@ class SignReader():
             self.sign_img = new_sign
             self.firstSignTime = rospy.Time.now() # start timer for reading sign
             print('assigned sign image and timer started')
-            print(self.sign_img.size)
         else:
             if new_sign.size > self.sign_img.size: # compare size of new sign to stored sign
                 self.sign_img = new_sign
@@ -167,22 +172,88 @@ class SignReader():
 
     # when enough time has elapsed from initial sign detection, get the letters from the best 
     # sign image and send them to the neural network
-    def read_sign(self):
+    def read_sign(self, sign):
         self.num_signs += 1
-        category, clue = sign_cropper.signToLetters(self.sign_img)
+        #cv2.imshow("sign "+str(self.num_signs), self.sign_img)
+        #cv2.waitKey(1)
+        clue = sign_cropper.signToLetters(sign)
         preds = []
         for i in range(clue.shape[0]):
-            img_aug = np.expand_dims(clue[i], axis=0)
-            letter = tf.expand_dims(img_aug, axis=-1)
-            yp = self.nn.predict(letter)[0]
-            predict_ind = np.argmax(yp)
-            pred = self.num_to_alphanum(int(predict_ind))
-            print(pred)
-            preds.append(pred)
+            img = clue[i]
+            h, w = img.shape[:2]
+            imgs = []
+            possibly = []
+            imgs.append(self.edit_letter(img, h, 0, w))
+            '''
+            imgs.append(self.edit_letter(img, h, 0, int(w*7/8)))
+            imgs.append(self.edit_letter(img, h, int(w*1/8), w))
+            imgs.append(self.edit_letter(img, h, int(w*1/8), int(w*7/8)))
+            imgs.append(self.edit_letter(img, h, 0, int(w*8/9)))
+            imgs.append(self.edit_letter(img, h, int(w*1/9), w))
+            imgs.append(self.edit_letter(img, h, int(w*1/9), int(w*8/9)))
+            '''
+            for edit in imgs:
+                possibly.append(self.predict_letter(edit))
+            possibly.append(self.predict_letter(imgs[0]))
+            possibly = sorted(possibly, key=lambda c: c[1])
+            possibly_weighted = []
+            omit_vals = []
+            pos_vals = []
+            pos_conf = []
+            '''
+            for j in range(len(possibly)):
+                if possibly[j][1] == 1:
+                    possibly_weighted.append(possibly[j][0])
+                    possibly_weighted.append(possibly[j][0])
+                if possibly[j][1] > 0.999 and possibly[j][1] < 1:                    
+                    possibly_weighted.append(possibly[j][0])
+                if possibly[j][1] < 0.6: 
+                    omit_vals.append(possibly[j][0])
+                print(possibly[j])
+            for o in omit_vals:
+                possibly_weighted = [k for k in possibly_weighted if i != o] 
+            if len(possibly_weighted) == 0:
+                possibly_weighted.append(possibly[-1])
+            predict = max(set(possibly_weighted), key=possibly_weighted.count)
+            for p in possibly_weighted:
+                print(p)
+                '''
+            for j in possibly:
+                print(j)
+                if j[1] == 1:
+                    j = (j[0],3)
+                if j[1] > 0.999:
+                    if j[0] in pos_vals:
+                        ind = pos_vals.index(j[0])
+                        pos_conf[ind] = pos_conf[ind] + j[1]
+                    else:
+                        pos_vals.append(j[0])
+                        pos_conf.append(j[1])
+            if len(pos_vals) == 0:
+                predict = possibly[-1][0]
+            else:
+                max_ind = np.argmax(pos_conf)
+                predict = pos_vals[max_ind]
+
+            preds.append(predict)
             
         prediction = ''.join(preds)
         print(str(prediction))
         return prediction
+    
+    def edit_letter(self, img, h, wstart, wend):
+        img = img[0:h, wstart:wend]
+        img = cv2.resize(img, (60,90), interpolation= cv2.INTER_LINEAR)
+        img_aug = np.expand_dims(img, axis=0)
+        letter = tf.expand_dims(img_aug, axis=-1)
+        return letter
+    
+    def predict_letter(self, img):
+        yp = self.nn.predict(img)[0]
+        predict_ind = np.argmax(yp)
+        pred = self.num_to_alphanum(int(predict_ind))
+        confidence = yp[predict_ind]
+        return (pred, confidence)
     
     def find_road_centre(self, img, y):
         """

@@ -529,9 +529,14 @@ class Driver():
     def start(self):
         # start the timer
         print('starting timer, entering road pid state')
+<<<<<<< HEAD
         # self.state = 'road'
         # self.state = 'desert'
         self.state = 'tunnel'
+=======
+        self.state = 'road'
+        #self.state = 'desert'
+>>>>>>> 61e21f48627e0169e7eed68bdf681939d7d1c729
     
     # main loop for the driver
     def run(self):
