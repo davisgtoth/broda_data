@@ -517,6 +517,14 @@ class Driver():
         x, y, w, h = cv2.boundingRect(combined_contour)
         return x + w // 2 if not ret_area else cv2.contourArea(combined_contour)
 
+    def check_hill_stop(self, img):
+        fg_mask = self.bg_sub.apply(img)
+        contours, _ = cv2.findContours(fg_mask, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
+        if len(contours) == 0:
+            return True
+        else:
+            return False
+
     # finds middle x value of sign at top of mountain
     def find_mountain_sign(self, img, check_area=False):
         lower_hsv = (5,20,0)
@@ -662,7 +670,7 @@ class Driver():
             # -------------------- yoda state --------------------
             elif self.state == 'yoda':
                 if not self.reached_yoda:
-                    while not self.check_yoda(self.img):
+                    while self.check_yoda(self.img):
                         self.drive_robot(0, 0)
                     print('getting close to cactus')
                     while not self.check_cactus(self.img):
@@ -686,6 +694,9 @@ class Driver():
                             self.drive_robot(self.lin_speed, self.rot_speed * error)
                     else:
                         while self.check_magenta(self.img, ret_y=True) < 410: #self.yoda_mag_y_exit:
+                            if self.check_hill_stop(self.img):
+                                self.drive_robot(0, 0)
+                                rospy.sleep(0.3)                            
                             mag_x = self.check_magenta(self.img, ret_midx=True)
                             error = self.kp * (self.yoda_mag_x_mid - mag_x) / self.yoda_mag_x_mid
                             self.drive_robot(0.6, self.rot_speed * error)
